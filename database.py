@@ -256,25 +256,28 @@ async def can_user_upload(user_id: int) -> tuple[bool, int, str]:
     if tracks_count >= max_allowed:
         return False, 0, "limit"  # Лимит треков, нужна оплата
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            """SELECT last_upload_ratings_count, tracks_since_checkpoint
-               FROM users WHERE user_id = ?""",
-            (user_id,),
-        )
-        row = await cursor.fetchone()
-        ratings_at_checkpoint = (row[0] or 0) if row else 0
-        tracks_since = (row[1] or 0) if row else 0
+    # ВРЕМЕННО ОТКЛЮЧЕНО: требование 5 оценок после каждых 3 загрузок
+    # async with aiosqlite.connect(DB_PATH) as db:
+    #     cursor = await db.execute(
+    #         """SELECT last_upload_ratings_count, tracks_since_checkpoint
+    #            FROM users WHERE user_id = ?""",
+    #         (user_id,),
+    #     )
+    #     row = await cursor.fetchone()
+    #     ratings_at_checkpoint = (row[0] or 0) if row else 0
+    #     tracks_since = (row[1] or 0) if row else 0
+    #
+    # current = await get_ratings_given_count(user_id)
+    # diff = current - ratings_at_checkpoint
+    #
+    # if tracks_since in (0, 1, 2):
+    #     return True, 0, ""
+    # if tracks_since == 3:
+    #     needed = max(0, 5 - diff)
+    #     return (needed == 0, needed, "" if needed == 0 else "ratings")
+    # return False, 5, "ratings"
 
-    current = await get_ratings_given_count(user_id)
-    diff = current - ratings_at_checkpoint
-
-    if tracks_since in (0, 1, 2):
-        return True, 0, ""
-    if tracks_since == 3:
-        needed = max(0, 5 - diff)
-        return (needed == 0, needed, "" if needed == 0 else "ratings")
-    return False, 5, "ratings"
+    return True, 0, ""
 
 
 async def update_after_upload(user_id: int) -> None:
