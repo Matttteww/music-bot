@@ -19,6 +19,7 @@ from database import (
     replace_track_and_reset_ratings,
     find_duplicate_track,
     get_free_replacements_left,
+    delete_track_by_user,
 )
 from handlers.upload import _get_audio_file_id_and_size
 from keyboards import (
@@ -28,6 +29,7 @@ from keyboards import (
     BTN_PROFILE,
     BTN_CHANGE_NICK,
     BTN_REPLACE_TRACK,
+    BTN_DELETE_TRACK,
     BTN_CANCEL,
 )
 
@@ -56,6 +58,21 @@ def _tracks_select_keyboard(tracks: list[dict]) -> InlineKeyboardMarkup:
             )
         )
     builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="repl_tr:cancel"))
+    return builder.as_markup()
+
+
+def _tracks_delete_keyboard(tracks: list[dict]) -> InlineKeyboardMarkup:
+    """Inline-кнопки выбора трека для удаления."""
+    builder = InlineKeyboardBuilder()
+    for t in tracks[:20]:
+        title = (t.get("title") or "?")[:40]
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🗑 {title}",
+                callback_data=f"del_tr:{t['track_id']}",
+            )
+        )
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="del_tr:cancel"))
     return builder.as_markup()
 
 
@@ -379,3 +396,65 @@ async def replace_receive_title(message: Message, state: FSMContext) -> None:
 @router.message(ReplaceTrack.waiting_title)
 async def replace_invalid_title(message: Message) -> None:
     await message.answer("Отправь текстом название трека. Для отмены нажми «❌ Отмена»")
+
+
+# ----- Удаление трека -----
+
+
+@router.message(F.text == BTN_DELETE_TRACK)
+async def start_delete_track(message: Message, state: FSMContext) -> None:
+    """Начать удаление трека — показать список."""
+    user = message.from_user
+    if not user:
+        return
+
+    await state.clear()
+    tracks = await get_user_tracks(user.id)
+    if not tracks:
+        await message.answer(
+            "У тебя нет треков для удаления.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    await message.answer(
+        "Выбери трек, который хочешь удалить:",
+        reply_markup=_tracks_delete_keyboard(tracks),
+    )
+
+
+@router.callback_query(F.data.startswith("del_tr:"))
+async def delete_track_callback(callback: CallbackQuery) -> None:
+    """Удаление выбранного трека."""
+    user = callback.from_user
+    if not user:
+        return
+
+    if callback.data == "del_tr:cancel":
+        try:
+            await callback.message.edit_text("Отмена.", reply_markup=None)
+        except Exception:
+            pass
+        await callback.message.answer("Выбери действие:", reply_markup=main_menu_keyboard())
+        await callback.answer()
+        return
+
+    track_id = int(callback.data.split(":")[1])
+    ok, result = await delete_track_by_user(track_id, user.id)
+
+    if ok:
+        title = result
+        try:
+            await callback.message.edit_text(
+                f"✅ Трек «{html.quote(title)}» удалён.",
+                reply_markup=None,
+            )
+        except Exception:
+            await callback.message.answer(f"✅ Трек «{html.quote(title)}» удалён.")
+        await callback.message.answer(
+            "Выбери действие:",
+            reply_markup=main_menu_keyboard(),
+        )
+        await callback.answer()
+    else:
+        await callback.answer(result, show_alert=True)

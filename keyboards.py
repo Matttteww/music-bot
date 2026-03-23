@@ -14,6 +14,7 @@ BTN_BACK = "◀️ Назад"
 BTN_MAIN_MENU = "◀️ Главное меню"
 BTN_CHANGE_NICK = "✏️ Поменять ник"
 BTN_REPLACE_TRACK = "🔄 Заменить трек"
+BTN_DELETE_TRACK = "🗑 Удалить трек"
 BTN_CANCEL = "❌ Отмена"
 BTN_STOP_VOTE = "◀️ Стоп"
 BTN_REPORT = "🚩 Пожаловаться"
@@ -80,7 +81,10 @@ def profile_keyboard(changes_left: int, has_tracks: bool = True) -> ReplyKeyboar
     if changes_left > 0:
         builder.row(KeyboardButton(text=BTN_CHANGE_NICK))
     if has_tracks:
-        builder.row(KeyboardButton(text=BTN_REPLACE_TRACK))
+        builder.row(
+            KeyboardButton(text=BTN_REPLACE_TRACK),
+            KeyboardButton(text=BTN_DELETE_TRACK),
+        )
     builder.row(KeyboardButton(text=BTN_MAIN_MENU))
     return builder.as_markup(resize_keyboard=True)
 

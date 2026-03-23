@@ -649,6 +649,30 @@ async def delete_track_and_warn_artist(track_id: int) -> tuple[bool, int | None,
         return True, artist_id, w
 
 
+async def delete_track_by_user(track_id: int, user_id: int) -> tuple[bool, str]:
+    """
+    Удаляет трек исполнителем (помечает deleted).
+    Проверяет принадлежность трека пользователю. Без предупреждения.
+    Возвращает (success, message).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT user_id, title FROM tracks WHERE track_id = ? AND COALESCE(deleted, 0) = 0",
+            (track_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return False, "Трек не найден."
+        if row[0] != user_id:
+            return False, "Это не твой трек."
+        await db.execute(
+            "UPDATE tracks SET deleted = 1 WHERE track_id = ?",
+            (track_id,),
+        )
+        await db.commit()
+        return True, row[1] or "Трек"
+
+
 async def clear_all_tracks() -> int:
     """
     Удаляет все треки и оценки. Для очистки тестовых данных.
