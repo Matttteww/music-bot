@@ -1,12 +1,26 @@
 """База данных для бота оценки треков."""
+import os
+
 import aiosqlite
-from config import DB_PATH, FREE_TRACKS_LIMIT, UNLIMITED_MODE
+
+from config import FREE_TRACKS_LIMIT, UNLIMITED_MODE
+
+# Путь к БД: пробуем из env, иначе /tmp в контейнере (запись), иначе music_ratings.db
+_db_path = os.getenv("DB_PATH") or (
+    "/tmp/music_ratings.db"
+    if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"))
+    else "music_ratings.db"
+)
+DB_PATH = _db_path
 
 
 async def init_db() -> None:
     """Инициализация БД."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+    global DB_PATH
+    for path in ["/tmp/music_ratings.db", DB_PATH, "music_ratings.db"]:
+        try:
+            async with aiosqlite.connect(path) as db:
+                await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL,
@@ -14,7 +28,7 @@ async def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        await db.execute("""
+                await db.execute("""
             CREATE TABLE IF NOT EXISTS tracks (
                 track_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -25,7 +39,7 @@ async def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
-        await db.execute("""
+                await db.execute("""
             CREATE TABLE IF NOT EXISTS ratings (
                 rating_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 track_id INTEGER NOT NULL,
@@ -37,16 +51,22 @@ async def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
-        await db.execute("""
+                await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_ratings_track ON ratings(track_id)
         """)
-        await db.execute("""
+                await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_ratings_user ON ratings(user_id)
         """)
-        await db.execute("""
+                await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_tracks_user ON tracks(user_id)
         """)
-        await db.commit()
+                await db.commit()
+            DB_PATH = path
+            break
+        except Exception:
+            continue
+    else:
+        raise RuntimeError("Не удалось открыть БД ни в одном из путей")
     await _migrate_db()
 
 
