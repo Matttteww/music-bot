@@ -230,13 +230,13 @@ async def replace_track_select(callback: CallbackQuery, state: FSMContext) -> No
 
     await state.update_data(replace_track_id=track_id)
     await state.set_state(ReplaceTrack.waiting_audio)
-    replacements_left = await get_free_replacements_left(user.id)
-    repl_str = "∞" if UNLIMITED_MODE else f"{replacements_left}/3"
+    repl_left = await get_free_replacements_left(user.id)
+    repl_display = "∞" if UNLIMITED_MODE else f"{repl_left}/3"
     try:
         await callback.message.edit_text(
-            "Отправь новый аудиофайл (mp3, m4a, ogg) до 20 МБ\n"
-            "или ссылку на SoundCloud.\n\n"
-            f"⚠️ При замене статистика трека обнулится. Осталось замен: {repl_str}",
+            f"Отправь новый аудиофайл (mp3, m4a, ogg) до 20 МБ\n"
+            f"или ссылку на SoundCloud.\n\n"
+            f"⚠️ При замене статистика трека обнулится. Осталось замен: {repl_display}",
             reply_markup=None,
         )
     except Exception:
