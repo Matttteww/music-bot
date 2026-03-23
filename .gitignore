@@ -1,0 +1,8 @@
+music_ratings.db
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.vs/
+*.slnx
