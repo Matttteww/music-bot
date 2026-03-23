@@ -28,10 +28,9 @@ MESSAGES = {
 }
 
 
-async def _payment_polling_task(bot: "Bot") -> None:
+async def _payment_polling_task(bot: Bot) -> None:
     """Фоновая проверка статуса ожидающих платежей."""
     from payments import check_payment_status
-    from aiogram import Bot
     while True:
         try:
             await asyncio.sleep(30)

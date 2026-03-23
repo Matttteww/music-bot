@@ -3,7 +3,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, Bot
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import REQUIRED_CHANNEL

@@ -1,23 +1,15 @@
 """База данных для бота оценки треков."""
-import os
-
 import aiosqlite
 
-from config import FREE_TRACKS_LIMIT, UNLIMITED_MODE
-
-# Путь к БД: пробуем из env, иначе /tmp в контейнере (запись), иначе music_ratings.db
-_db_path = os.getenv("DB_PATH") or (
-    "/tmp/music_ratings.db"
-    if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"))
-    else "music_ratings.db"
-)
-DB_PATH = _db_path
+from config import DB_PATH, FREE_TRACKS_LIMIT, UNLIMITED_MODE
 
 
 async def init_db() -> None:
     """Инициализация БД."""
     global DB_PATH
-    for path in ["/tmp/music_ratings.db", DB_PATH, "music_ratings.db"]:
+    paths = ["/tmp/music_ratings.db", DB_PATH, "music_ratings.db"]
+    paths = list(dict.fromkeys(paths))
+    for path in paths:
         try:
             async with aiosqlite.connect(path) as db:
                 await db.execute("""

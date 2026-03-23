@@ -16,7 +16,7 @@ from database import (
     replace_track_and_reset_ratings,
     get_free_replacements_left,
 )
-from keyboards import main_menu_keyboard, cancel_keyboard, BTN_UPLOAD, BTN_MAIN_MENU, BTN_CANCEL
+from keyboards import main_menu_keyboard, cancel_keyboard, BTN_UPLOAD, BTN_CANCEL
 
 router = Router(name="upload")
 
