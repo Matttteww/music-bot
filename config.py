@@ -36,9 +36,14 @@ REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "942340947")
 # Обязательная подписка (t.me/bigsomani)
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bigsomani")
 
-# Проверка SoundCloud-ссылки (soundcloud.com/user/track-name)
+# Проверка SoundCloud-ссылки:
+# — длинные: soundcloud.com/user/track-name
+# — короткие: on.soundcloud.com/XXXXX
 SOUNDCLOUD_PATTERN = re.compile(
-    r"^https?://(www\.|m\.)?soundcloud\.com/[^/]+/[^/\s]+",
+    r"^https?://"
+    r"(?:(?:www\.|m\.)?soundcloud\.com/[^/]+/[^\s]+"  # soundcloud.com/artist/track
+    r"|on\.soundcloud\.com/[a-zA-Z0-9_-]+)"           # on.soundcloud.com/shortId
+    r"\s*$",
     re.IGNORECASE,
 )
 

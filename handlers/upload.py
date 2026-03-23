@@ -131,7 +131,7 @@ async def receive_soundcloud_link(message: Message, state: FSMContext) -> None:
     if not is_soundcloud_url(text):
         await message.answer(
             "Отправь аудиофайл или валидную ссылку SoundCloud.\n"
-            "Пример: https://soundcloud.com/artist/track-name"
+            "Примеры: soundcloud.com/artist/track или on.soundcloud.com/xxxxx"
         )
         return
     await state.update_data(source_url=text, file_id=None, file_name=None)
