@@ -6,8 +6,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import MAX_AUDIO_SIZE_BYTES, is_soundcloud_url
-from handlers.payments import pay_keyboard
+from config import MAX_AUDIO_SIZE_BYTES, is_soundcloud_url, PAYMENTS_DISABLED, UNLIMITED_MODE
+# from handlers.payments import pay_keyboard  # ВРЕМЕННО: импорт внутри при PAYMENTS_DISABLED=False
 from database import (
     get_user_tracks,
     get_user_tracks_replaceable,
@@ -80,11 +80,12 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     name = html.quote(disp["display_name"] or disp["username"] or "Пользователь")
     replacements_left = await get_free_replacements_left(user.id)
     tracks_count = await get_user_tracks_count(user.id)
+    repl_text = "∞" if UNLIMITED_MODE else str(replacements_left)
     lines = [
         f"👤 <b>Профиль</b>",
         f"Исполнитель: {name}",
         f"Смен ника осталось: {disp['changes_left']}/3",
-        f"Треков: {tracks_count} | Замен доступно: {replacements_left}",
+        f"Треков: {tracks_count} | Замен доступно: {repl_text}",
         "",
         f"📊 <b>Рейтинг исполнителя:</b> {stats['artist_avg']}/10",
         f"📈 <b>Всего оценок:</b> {stats['total_ratings']}",
@@ -182,11 +183,19 @@ async def start_replace_track(message: Message, state: FSMContext) -> None:
 
     replacements_left = await get_free_replacements_left(user.id)
     if replacements_left <= 0:
-        kb = pay_keyboard("replace")
-        await message.answer(
-            "Лимит бесплатных замен исчерпан (3/3). Дополнительная замена — 29₽",
-            reply_markup=kb or main_menu_keyboard(),
-        )
+        # ВРЕМЕННО ОТКЛЮЧЕНО: kb = pay_keyboard("replace")
+        if PAYMENTS_DISABLED:
+            await message.answer(
+                "Лимит бесплатных замен исчерпан (3/3). Оплата скоро будет доступна.",
+                reply_markup=main_menu_keyboard(),
+            )
+        else:
+            from handlers.payments import pay_keyboard
+            kb = pay_keyboard("replace")
+            await message.answer(
+                "Лимит бесплатных замен исчерпан (3/3). Дополнительная замена — 29₽",
+                reply_markup=kb or main_menu_keyboard(),
+            )
         return
 
     await state.set_state(ReplaceTrack.choosing)
@@ -221,12 +230,13 @@ async def replace_track_select(callback: CallbackQuery, state: FSMContext) -> No
 
     await state.update_data(replace_track_id=track_id)
     await state.set_state(ReplaceTrack.waiting_audio)
-    replacements_left = await get_free_replacements_left(user.id)
-    try:
-        await callback.message.edit_text(
-            "Отправь новый аудиофайл (mp3, m4a, ogg) до 20 МБ\n"
-            "или ссылку на SoundCloud.\n\n"
-            f"⚠️ При замене статистика трека обнулится. Осталось замен: {replacements_left}/3",
+        replacements_left = await get_free_replacements_left(user.id)
+        repl_str = "∞" if UNLIMITED_MODE else f"{replacements_left}/3"
+        try:
+            await callback.message.edit_text(
+                "Отправь новый аудиофайл (mp3, m4a, ogg) до 20 МБ\n"
+                "или ссылку на SoundCloud.\n\n"
+                f"⚠️ При замене статистика трека обнулится. Осталось замен: {repl_str}",
             reply_markup=None,
         )
     except Exception:

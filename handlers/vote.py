@@ -11,6 +11,7 @@ from database import (
     add_rating,
     get_or_create_user,
     get_track,
+    get_user_display_info,
     delete_track_and_warn_artist,
     ban_user,
 )
@@ -398,6 +399,25 @@ async def process_rating(message: Message, state: FSMContext, bot: Bot) -> None:
     if not success:
         await message.answer(msg)
         return
+
+    # Уведомить автора трека об оценке
+    rated_track = await get_track(track_id)
+    if rated_track and rated_track.get("user_id") != user.id:
+        artist_id = rated_track["user_id"]
+        title = rated_track.get("title") or "трек"
+        voter_info = await get_user_display_info(user.id)
+        voter_name = (
+            voter_info.get("display_name")
+            or (f"@{voter_info['username']}" if voter_info.get("username") else None)
+            or user.full_name
+            or "Пользователь"
+        )
+        voter_name_safe = voter_name if str(voter_name).startswith("@") else html.quote(str(voter_name))
+        notify_text = f"{voter_name_safe} оценил ваш трек «{html.quote(title)}» на {score} баллов."
+        try:
+            await bot.send_message(artist_id, notify_text)
+        except Exception:
+            pass
 
     track = await get_random_track_for_voting(user.id)
     if track:

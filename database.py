@@ -1,6 +1,6 @@
 """База данных для бота оценки треков."""
 import aiosqlite
-from config import DB_PATH, FREE_TRACKS_LIMIT
+from config import DB_PATH, FREE_TRACKS_LIMIT, UNLIMITED_MODE
 
 
 async def init_db() -> None:
@@ -253,31 +253,29 @@ async def can_user_upload(user_id: int) -> tuple[bool, int, str]:
     paid_slots = await get_paid_upload_slots(user_id)
     max_allowed = FREE_TRACKS_LIMIT + paid_slots
 
-    if tracks_count >= max_allowed:
+    # ВРЕМЕННО ОТКЛЮЧЕНО: при UNLIMITED_MODE не блокируем по лимиту треков
+    if not UNLIMITED_MODE and tracks_count >= max_allowed:
         return False, 0, "limit"  # Лимит треков, нужна оплата
 
-    # ВРЕМЕННО ОТКЛЮЧЕНО: требование 5 оценок после каждых 3 загрузок
-    # async with aiosqlite.connect(DB_PATH) as db:
-    #     cursor = await db.execute(
-    #         """SELECT last_upload_ratings_count, tracks_since_checkpoint
-    #            FROM users WHERE user_id = ?""",
-    #         (user_id,),
-    #     )
-    #     row = await cursor.fetchone()
-    #     ratings_at_checkpoint = (row[0] or 0) if row else 0
-    #     tracks_since = (row[1] or 0) if row else 0
-    #
-    # current = await get_ratings_given_count(user_id)
-    # diff = current - ratings_at_checkpoint
-    #
-    # if tracks_since in (0, 1, 2):
-    #     return True, 0, ""
-    # if tracks_since == 3:
-    #     needed = max(0, 5 - diff)
-    #     return (needed == 0, needed, "" if needed == 0 else "ratings")
-    # return False, 5, "ratings"
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """SELECT last_upload_ratings_count, tracks_since_checkpoint
+               FROM users WHERE user_id = ?""",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        ratings_at_checkpoint = (row[0] or 0) if row else 0
+        tracks_since = (row[1] or 0) if row else 0
 
-    return True, 0, ""
+    current = await get_ratings_given_count(user_id)
+    diff = current - ratings_at_checkpoint
+
+    if tracks_since in (0, 1, 2):
+        return True, 0, ""
+    if tracks_since == 3:
+        needed = max(0, 5 - diff)
+        return (needed == 0, needed, "" if needed == 0 else "ratings")
+    return False, 5, "ratings"
 
 
 async def update_after_upload(user_id: int) -> None:
@@ -382,6 +380,9 @@ FREE_REPLACEMENTS_LIMIT = 3
 
 async def get_replacements_available(user_id: int) -> int:
     """Сколько замен доступно: 3 бесплатных + оплаченные - использованные."""
+    # ВРЕМЕННО ОТКЛЮЧЕНО: без лимитов при UNLIMITED_MODE
+    if UNLIMITED_MODE:
+        return 999
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """SELECT COALESCE(free_replacements_used, 0), COALESCE(paid_replacements_used, 0)
@@ -431,12 +432,14 @@ async def replace_track_and_reset_ratings(
         if not row or row[0] != user_id:
             return False, "Трек не найден."
 
-        available = await get_replacements_available(user_id)
-        if available <= 0:
-            return False, (
-                f"Лимит замен исчерпан. Дополнительная замена — 29₽ "
-                "(оплата скоро будет доступна)."
-            )
+        # ВРЕМЕННО ОТКЛЮЧЕНО: проверка лимита замен при UNLIMITED_MODE
+        if not UNLIMITED_MODE:
+            available = await get_replacements_available(user_id)
+            if available <= 0:
+                return False, (
+                    f"Лимит замен исчерпан. Дополнительная замена — 29₽ "
+                    "(оплата скоро будет доступна)."
+                )
 
         free_used = 0
         paid_used = 0
@@ -449,12 +452,13 @@ async def replace_track_and_reset_ratings(
         if row:
             free_used, paid_used = row[0], row[1]
 
-        if free_used < FREE_REPLACEMENTS_LIMIT:
+        # ВРЕМЕННО ОТКЛЮЧЕНО: не списывать замены при UNLIMITED_MODE
+        if not UNLIMITED_MODE and free_used < FREE_REPLACEMENTS_LIMIT:
             await db.execute(
                 "UPDATE users SET free_replacements_used = COALESCE(free_replacements_used, 0) + 1 WHERE user_id = ?",
                 (user_id,),
             )
-        else:
+        elif not UNLIMITED_MODE:
             await db.execute(
                 "UPDATE users SET paid_replacements_used = COALESCE(paid_replacements_used, 0) + 1 WHERE user_id = ?",
                 (user_id,),
@@ -628,6 +632,23 @@ async def delete_track_and_warn_artist(track_id: int) -> tuple[bool, int | None,
         w = (await cursor.fetchone())[0]
         await db.commit()
         return True, artist_id, w
+
+
+async def clear_all_tracks() -> int:
+    """
+    Удаляет все треки и оценки. Для очистки тестовых данных.
+    Возвращает количество удалённых треков.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM tracks")
+        count = (await cursor.fetchone())[0]
+        await db.execute("DELETE FROM ratings")
+        await db.execute("DELETE FROM tracks")
+        await db.execute(
+            "UPDATE users SET tracks_since_checkpoint = 0, last_upload_ratings_count = 0"
+        )
+        await db.commit()
+        return count
 
 
 async def get_user_warnings(user_id: int) -> int:

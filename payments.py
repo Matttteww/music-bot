@@ -66,10 +66,19 @@ def _check_payment_sync(payment_id: str) -> Optional[str]:
         return None
 
 
+PAYMENT_TIMEOUT = 15  # секунд на запрос к YooKassa
+
 async def create_payment(user_id: int, product_type: str) -> tuple[Optional[str], Optional[str]]:
     """Создать платёж. Возвращает (url, payment_id) или (None, error)."""
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, _create_payment_sync, user_id, product_type)
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, _create_payment_sync, user_id, product_type),
+            timeout=PAYMENT_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("YooKassa create payment timeout")
+        return None, "Превышено время ожидания. Попробуй позже."
     url, pid_or_err, amount = result
     if url and pid_or_err and amount > 0:
         await add_pending_payment(pid_or_err, user_id, product_type, amount)
@@ -81,4 +90,11 @@ async def create_payment(user_id: int, product_type: str) -> tuple[Optional[str]
 async def check_payment_status(payment_id: str) -> Optional[str]:
     """Проверить статус платежа асинхронно."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _check_payment_sync, payment_id)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _check_payment_sync, payment_id),
+            timeout=PAYMENT_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("YooKassa check payment timeout")
+        return None

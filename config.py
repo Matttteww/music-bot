@@ -8,7 +8,12 @@ MAX_AUDIO_SIZE_MB = 20
 # ЮKassa (оплата). Добавь YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в переменные окружения Bothost
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "")
-YOO_KASSA_ENABLED = bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+# ВРЕМЕННО ОТКЛЮЧЕНО: True = оплата выключена (запуск без ЮKassa)
+PAYMENTS_DISABLED = True  # Когда ЮKassa подключишь — поставь False
+YOO_KASSA_ENABLED = (not PAYMENTS_DISABLED) and bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+
+# ВРЕМЕННО: True = без лимитов (треков и замен сколько угодно). Когда ЮMoney будет — поставь False
+UNLIMITED_MODE = True
 
 # Монетизация
 FREE_TRACKS_LIMIT = 10
@@ -17,7 +22,8 @@ PRICE_PACK_5 = 159
 PRICE_REPLACEMENT = 29
 MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_MB * 1024 * 1024
 ALLOWED_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".ogg")
-DB_PATH = "music_ratings.db"
+# Путь к БД. На Bothost с Volume: задай DB_PATH=/data/music_ratings.db в переменных окружения
+DB_PATH = os.getenv("DB_PATH", "music_ratings.db")
 
 # Куда отправлять жалобы (chat_id админа @bigsomanii)
 REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "942340947")

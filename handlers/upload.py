@@ -6,8 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import MAX_AUDIO_SIZE_BYTES, is_soundcloud_url
-from handlers.payments import pay_keyboard
+from config import MAX_AUDIO_SIZE_BYTES, is_soundcloud_url, PAYMENTS_DISABLED, UNLIMITED_MODE
 from database import (
     add_track,
     get_or_create_user,
@@ -38,14 +37,20 @@ async def start_upload(message: Message, state: FSMContext) -> None:
     can_upload, needed, block_reason = await can_user_upload(user.id)
     if not can_upload:
         if block_reason == "limit":
-            kb = pay_keyboard("limit")
-            await message.answer(
-                "📤 Лимит бесплатных треков (10) исчерпан.\n\n"
-                "Оплати дополнительные слоты:\n"
-                "• 1 трек — 39₽\n"
-                "• Пакет 5 треков — 159₽ (выгоднее!)",
-                reply_markup=kb or main_menu_keyboard(),
-            )
+            # ВРЕМЕННО ОТКЛЮЧЕНО: kb = pay_keyboard("limit") — при PAYMENTS_DISABLED показываем сообщение
+            if PAYMENTS_DISABLED:
+                await message.answer(
+                    "📤 Лимит бесплатных треков (10) исчерпан.\n\nОплата скоро будет доступна.",
+                    reply_markup=main_menu_keyboard(),
+                )
+            else:
+                from handlers.payments import pay_keyboard
+                kb = pay_keyboard("limit")
+                await message.answer(
+                    "📤 Лимит бесплатных треков (10) исчерпан.\n\n"
+                    "Оплати дополнительные слоты:\n• 1 трек — 39₽\n• Пакет 5 треков — 159₽ (выгоднее!)",
+                    reply_markup=kb or main_menu_keyboard(),
+                )
         else:
             await message.answer(
                 f"📤 Первые 3 трека можно загрузить без оценок. "
@@ -180,11 +185,18 @@ async def receive_title(message: Message, state: FSMContext) -> None:
     if dup:
         replacements_left = await get_free_replacements_left(user.id)
         if replacements_left <= 0:
-            kb = pay_keyboard("replace")
-            await message.answer(
-                "⚠️ Вы уже загружали этот трек. Лимит замен исчерпан. Доп. замена — 29₽",
-                reply_markup=kb or main_menu_keyboard(),
-            )
+            if PAYMENTS_DISABLED:
+                await message.answer(
+                    "⚠️ Вы уже загружали этот трек. Лимит замен исчерпан. Оплата скоро будет доступна.",
+                    reply_markup=main_menu_keyboard(),
+                )
+            else:
+                from handlers.payments import pay_keyboard
+                kb = pay_keyboard("replace")
+                await message.answer(
+                    "⚠️ Вы уже загружали этот трек. Лимит замен исчерпан. Доп. замена — 29₽",
+                    reply_markup=kb or main_menu_keyboard(),
+                )
             await state.clear()
             return
         await state.set_state(UploadTrack.replace_confirm)
@@ -195,9 +207,10 @@ async def receive_title(message: Message, state: FSMContext) -> None:
             title=title,
             file_name=file_name,
         )
+        repl_str = "∞" if UNLIMITED_MODE else f"{replacements_left}/3"
         await message.answer(
             "⚠️ Вы его уже загружали. Хотите поменять файл?\n\n"
-            f"При замене статистика трека обнулится. Бесплатных замен осталось: {replacements_left}/3",
+            f"При замене статистика трека обнулится. Бесплатных замен осталось: {repl_str}",
             reply_markup=_replace_confirm_keyboard(dup["track_id"]),
         )
         return
@@ -214,8 +227,8 @@ async def receive_title(message: Message, state: FSMContext) -> None:
     await update_after_upload(user.id)
     await message.answer(
         f"✅ Трек «{title}» успешно загружен!\n\n"
-        "Он добавлен в пул для голосования. Другие пользователи смогут его оценить.",
-        # + "\n\nПосле каждых 3 треков нужно оценить 5 чужих (первые 3 — без оценок)."  # временно отключено
+        "Он добавлен в пул для голосования. Другие пользователи смогут его оценить.\n\n"
+        "После каждых 3 треков нужно оценить 5 чужих (первые 3 — без оценок).",
         reply_markup=main_menu_keyboard(),
     )
 
