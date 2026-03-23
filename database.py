@@ -7,7 +7,8 @@ from config import DB_PATH, FREE_TRACKS_LIMIT, UNLIMITED_MODE
 async def init_db() -> None:
     """Инициализация БД."""
     global DB_PATH
-    paths = ["/tmp/music_ratings.db", DB_PATH, "music_ratings.db"]
+    # DB_PATH из config (env) — приоритет. Иначе fallback: /tmp, затем локально
+    paths = [DB_PATH, "/tmp/music_ratings.db", "music_ratings.db"]
     paths = list(dict.fromkeys(paths))
     for path in paths:
         try:
