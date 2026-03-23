@@ -734,7 +734,7 @@ async def get_user_stats(user_id: int) -> dict:
 
 
 async def get_top_tracks(limit: int = 10) -> list[dict]:
-    """ТОП треков по среднему баллу. Только треки с >= 5 оценок."""
+    """ТОП треков по среднему баллу. Треки с >= 1 оценкой."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
@@ -745,7 +745,7 @@ async def get_top_tracks(limit: int = 10) -> list[dict]:
                JOIN users u ON t.user_id = u.user_id
                JOIN (
                    SELECT track_id, AVG(score) as avg_score, COUNT(*) as rating_count
-                   FROM ratings GROUP BY track_id HAVING COUNT(*) >= 5
+                   FROM ratings GROUP BY track_id HAVING COUNT(*) >= 1
                ) r ON t.track_id = r.track_id
                WHERE COALESCE(t.deleted, 0) = 0
                ORDER BY r.avg_score DESC, r.rating_count DESC
@@ -758,7 +758,7 @@ async def get_top_tracks(limit: int = 10) -> list[dict]:
 async def get_top_artists(limit: int = 10) -> list[dict]:
     """
     ТОП исполнителей по среднему баллу всех треков.
-    Только те, у кого суммарно >= 10 оценок.
+    Исполнители с >= 1 оценкой. Обновляется при каждой новой оценке.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -773,7 +773,7 @@ async def get_top_artists(limit: int = 10) -> list[dict]:
                    FROM ratings GROUP BY track_id
                ) r ON t.track_id = r.track_id
                GROUP BY u.user_id
-               HAVING SUM(r.rating_count) >= 10
+               HAVING SUM(r.rating_count) >= 1
                ORDER BY artist_avg DESC, total_ratings DESC
                LIMIT ?""",
             (limit,)

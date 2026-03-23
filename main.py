@@ -11,6 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN, YOO_KASSA_ENABLED
 from database import init_db, get_all_pending_payments, add_purchase, remove_pending_payment
 from handlers import start, profile, upload, vote, ratings, admin, payments
+from subscription import SubscriptionMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +69,7 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=MemoryStorage())
+    dp.update.outer_middleware(SubscriptionMiddleware(bot))
 
     dp.include_router(start.router)
     dp.include_router(profile.router)

@@ -1,10 +1,11 @@
 """Обработчики рейтингов."""
-from aiogram import Router, F, html
+from aiogram import Router, F, html, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database import get_top_tracks, get_top_artists
+from database import get_top_tracks, get_top_artists, get_track, get_user_tracks, get_user_display_info
 from keyboards import ratings_menu_keyboard, back_to_ratings_keyboard, main_menu_keyboard, BTN_RATINGS, BTN_TOP_TRACKS, BTN_TOP_ARTISTS, BTN_BACK
 
 router = Router(name="ratings")
@@ -25,51 +26,90 @@ async def show_ratings_menu(message: Message, state: FSMContext) -> None:
     )
 
 
+def _track_listen_caption(title: str, username: str, source_url: str | None) -> str:
+    """Подпись трека для прослушивания."""
+    text = f"🎵 <b>{html.quote(title)}</b>\nИсполнитель: @{html.quote(username)}"
+    if source_url:
+        text += f"\n\n🔗 <a href=\"{source_url}\">Слушать на SoundCloud</a>"
+    return text
+
+
+async def _send_track_for_listen(bot: Bot, track: dict, chat_id: int) -> None:
+    """Отправить трек для прослушивания (без кнопок оценки)."""
+    caption = _track_listen_caption(
+        track["title"],
+        track.get("username") or "unknown",
+        track.get("source_url"),
+    )
+    if track.get("source_url"):
+        await bot.send_message(chat_id=chat_id, text=caption)
+    else:
+        await bot.send_audio(
+            chat_id=chat_id,
+            audio=track["file_id"],
+            caption=caption,
+        )
+
+
 @router.message(F.text == BTN_TOP_TRACKS)
 async def show_top_tracks(message: Message, state: FSMContext) -> None:
-    """ТОП-10 треков."""
+    """ТОП-10 треков с кнопками для прослушивания."""
     tracks = await get_top_tracks(limit=10)
     if not tracks:
         text = (
             "🎵 <b>ТОП треков</b>\n\n"
-            "Пока нет треков с минимум 5 оценками.\n"
-            "Оценивай треки — рейтинг появится!"
+            "Пока нет оценённых треков. Голосуй — рейтинг появится!"
         )
+        kb = back_to_ratings_keyboard()
     else:
-        lines = ["🎵 <b>ТОП-10 треков</b>\n\n"]
+        lines = ["🎵 <b>ТОП-10 треков</b>\n\nНажми на трек, чтобы послушать:"]
+        builder = InlineKeyboardBuilder()
         for i, t in enumerate(tracks, 1):
             avg = round(float(t.get('avg_score') or 0), 1)
             cnt = int(t.get('rating_count') or 0)
-            lines.append(
-                f"{i}. {html.quote(t['title'])} — @{html.quote(t.get('username', 'unknown'))}\n"
-                f"   {avg}/10 ({cnt} оценок)"
+            title_short = (t.get("title") or "?")[:35]
+            lines.append(f"{i}. {html.quote(t['title'])} — @{html.quote(t.get('username', 'unknown'))} ({avg}/10)")
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"🎵 {title_short}",
+                    callback_data=f"listen:{t['track_id']}",
+                )
             )
         text = "\n".join(lines)
+        builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ratings_back"))
+        kb = builder.as_markup()
     await state.set_state(RatingsState.viewing)
-    await message.answer(text, reply_markup=back_to_ratings_keyboard())
+    await message.answer(text, reply_markup=kb)
 
 
 @router.message(F.text == BTN_TOP_ARTISTS)
 async def show_top_artists(message: Message, state: FSMContext) -> None:
-    """ТОП-10 исполнителей."""
+    """ТОП-10 исполнителей с кнопками — нажать = треки исполнителя."""
     artists = await get_top_artists(limit=10)
     if not artists:
         text = (
             "👤 <b>ТОП исполнителей</b>\n\n"
-            "Пока нет исполнителей с минимум 10 оценками на все треки.\n"
-            "Голосуй за треки — рейтинг появится!"
+            "Пока нет оценённых исполнителей. Голосуй — рейтинг появится!"
         )
+        kb = back_to_ratings_keyboard()
     else:
-        lines = ["👤 <b>ТОП-10 исполнителей</b>\n\n"]
+        lines = ["👤 <b>ТОП-10 исполнителей</b>\n\nНажми на исполнителя, чтобы послушать его треки:"]
+        builder = InlineKeyboardBuilder()
         for i, a in enumerate(artists, 1):
             cnt = int(a.get('total_ratings') or 0)
-            lines.append(
-                f"{i}. @{html.quote(a.get('username', 'unknown'))} — {a['artist_avg']}/10 "
-                f"({cnt} оценок)"
+            uname = a.get('username', 'unknown')
+            lines.append(f"{i}. @{html.quote(uname)} — {a['artist_avg']}/10 ({cnt} оценок)")
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"👤 @{uname[:25]}",
+                    callback_data=f"artist:{a['user_id']}",
+                )
             )
         text = "\n".join(lines)
+        builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ratings_back"))
+        kb = builder.as_markup()
     await state.set_state(RatingsState.viewing)
-    await message.answer(text, reply_markup=back_to_ratings_keyboard())
+    await message.answer(text, reply_markup=kb)
 
 
 @router.message(RatingsState.menu, F.text == BTN_BACK)
@@ -77,6 +117,75 @@ async def back_from_ratings_menu(message: Message, state: FSMContext) -> None:
     """Назад из меню рейтингов в главное меню."""
     await state.clear()
     await message.answer("Выбери действие:", reply_markup=main_menu_keyboard())
+
+
+@router.callback_query(F.data == "ratings_back")
+async def callback_ratings_back(callback: CallbackQuery, state: FSMContext) -> None:
+    """Назад в меню рейтингов (из inline)."""
+    await state.set_state(RatingsState.menu)
+    try:
+        await callback.message.edit_text(
+            "🏆 <b>Рейтинги</b>\n\nВыбери категорию:",
+            reply_markup=None,
+        )
+    except Exception:
+        await callback.message.answer(
+            "🏆 <b>Рейтинги</b>\n\nВыбери категорию:",
+            reply_markup=ratings_menu_keyboard(),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("listen:"))
+async def callback_listen_track(callback: CallbackQuery, bot: Bot) -> None:
+    """Отправить трек для прослушивания."""
+    track_id = int(callback.data.split(":")[1])
+    track = await get_track(track_id)
+    if not track:
+        await callback.answer("Трек не найден.", show_alert=True)
+        return
+    await _send_track_for_listen(bot, track, callback.message.chat.id)
+    await callback.answer("🎵")
+
+
+@router.callback_query(F.data.startswith("artist:"))
+async def callback_artist_tracks(callback: CallbackQuery) -> None:
+    """Показать треки исполнителя."""
+    user_id = int(callback.data.split(":")[1])
+    tracks = await get_user_tracks(user_id)
+    if not tracks:
+        await callback.answer("У исполнителя нет треков.", show_alert=True)
+        return
+    disp = await get_user_display_info(user_id)
+    uname = disp.get("display_name") or (f"@{disp['username']}" if disp.get("username") else "?")
+    builder = InlineKeyboardBuilder()
+    for t in tracks[:15]:
+        title_short = (t.get("title") or "?")[:35]
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🎵 {title_short}",
+                callback_data=f"listen:{t['track_id']}",
+            )
+        )
+    if len(tracks) > 15:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"... ещё {len(tracks) - 15}",
+                callback_data="noop",
+            )
+        )
+    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ratings_back"))
+    text = f"👤 Треки {html.quote(uname)}\n\nНажми на трек, чтобы послушать:"
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    except Exception:
+        await callback.message.answer(text, reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def callback_noop(callback: CallbackQuery) -> None:
+    await callback.answer()
 
 
 @router.message(RatingsState.viewing, F.text == BTN_BACK)

@@ -1,27 +1,18 @@
 """Обработчики старта и главного меню."""
-from aiogram import Router, F, html
+from aiogram import Bot, Router, F, html
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from database import get_or_create_user
 from keyboards import main_menu_keyboard, BTN_MAIN_MENU
+from subscription import is_subscribed, subscribe_keyboard, MSG_SUBSCRIBE
 
 router = Router(name="start")
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    """Команда /start — регистрация и приветствие."""
-    user = message.from_user
-    if not user:
-        return
-    is_new = await get_or_create_user(
-        user_id=user.id,
-        username=user.username or str(user.id),
-        full_name=user.full_name or "User",
-    )
-    name = html.quote(user.full_name or user.username or "Пользователь")
+async def _send_main_menu(bot: Bot, chat_id: int, is_new: bool, name: str) -> None:
+    """Отправляет приветствие и главное меню."""
     if is_new:
         text = (
             f"👋 Привет, {name}!\n\n"
@@ -34,8 +25,57 @@ async def cmd_start(message: Message) -> None:
         )
     else:
         text = f"С возвращением, {name}! Чем займёмся?"
+    await bot.send_message(chat_id, text, reply_markup=main_menu_keyboard())
 
-    await message.answer(text, reply_markup=main_menu_keyboard())
+
+@router.message(CommandStart())
+async def cmd_start(message: Message, bot: Bot) -> None:
+    """Команда /start — проверка подписки, регистрация и приветствие."""
+    user = message.from_user
+    if not user:
+        return
+
+    if not await is_subscribed(bot, user.id):
+        await message.answer(MSG_SUBSCRIBE, reply_markup=subscribe_keyboard())
+        return
+
+    is_new = await get_or_create_user(
+        user_id=user.id,
+        username=user.username or str(user.id),
+        full_name=user.full_name or "User",
+    )
+    name = html.quote(user.full_name or user.username or "Пользователь")
+    await _send_main_menu(bot, message.chat.id, is_new, name)
+
+
+@router.callback_query(F.data == "check_sub")
+async def check_sub_callback(callback: CallbackQuery, bot: Bot) -> None:
+    """Проверка подписки по нажатию кнопки."""
+    user = callback.from_user
+    if not user:
+        return
+
+    if not await is_subscribed(bot, user.id):
+        await callback.answer("Подпишись на канал и попробуй снова", show_alert=True)
+        return
+
+    await callback.answer("✅ Подписка подтверждена!")
+    if not callback.message:
+        return
+    is_new = await get_or_create_user(
+        user_id=user.id,
+        username=user.username or str(user.id),
+        full_name=user.full_name or "User",
+    )
+    name = html.quote(user.full_name or user.username or "Пользователь")
+    try:
+        await callback.message.edit_text(
+            f"✅ Отлично, {name}! Добро пожаловать.",
+            reply_markup=None,
+        )
+    except Exception:
+        pass
+    await _send_main_menu(bot, callback.message.chat.id, is_new, name)
 
 
 @router.message(F.text == "/myid")

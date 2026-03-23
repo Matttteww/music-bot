@@ -22,6 +22,9 @@ DB_PATH = "music_ratings.db"
 # Куда отправлять жалобы (chat_id админа @bigsomanii)
 REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "942340947")
 
+# Обязательная подписка (t.me/bigsomani)
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bigsomani")
+
 # Проверка SoundCloud-ссылки (soundcloud.com/user/track-name)
 SOUNDCLOUD_PATTERN = re.compile(
     r"^https?://(www\.|m\.)?soundcloud\.com/[^/]+/[^/\s]+",

@@ -59,7 +59,7 @@ async def start_upload(message: Message, state: FSMContext) -> None:
     await state.set_state(UploadTrack.waiting_audio)
     await message.answer(
         "📤 Отправь аудиофайл (mp3, m4a, ogg) до 20 МБ\n"
-        "или вставь ссылку на SoundCloud (https://soundcloud.com/...).\n\n"
+        "или вставь ссылку на SoundCloud.\n\n"
         "После этого нужно будет указать название трека.",
         reply_markup=cancel_keyboard(),
     )
