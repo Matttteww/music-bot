@@ -7,6 +7,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import MAX_AUDIO_SIZE_BYTES, is_soundcloud_url
+from handlers.payments import pay_keyboard
 from database import (
     add_track,
     get_or_create_user,
@@ -14,6 +15,7 @@ from database import (
     update_after_upload,
     find_duplicate_track,
     replace_track_and_reset_ratings,
+    get_free_replacements_left,
 )
 from keyboards import main_menu_keyboard, cancel_keyboard, BTN_UPLOAD, BTN_MAIN_MENU, BTN_CANCEL
 
@@ -33,15 +35,25 @@ async def start_upload(message: Message, state: FSMContext) -> None:
     if not user:
         return
 
-    can_upload, needed = await can_user_upload(user.id)
+    can_upload, needed, block_reason = await can_user_upload(user.id)
     if not can_upload:
-        await message.answer(
-            f"📤 Первые 3 трека можно загрузить без оценок. "
-            f"После каждых 3 загруженных треков нужно оценить 5 чужих.\n\n"
-            f"Осталось оценок: {needed}/5\n\n"
-            f"Нажми «🎵 Голосовать», чтобы оценить треки.",
-            reply_markup=main_menu_keyboard(),
-        )
+        if block_reason == "limit":
+            kb = pay_keyboard("limit")
+            await message.answer(
+                "📤 Лимит бесплатных треков (10) исчерпан.\n\n"
+                "Оплати дополнительные слоты:\n"
+                "• 1 трек — 39₽\n"
+                "• Пакет 5 треков — 159₽ (выгоднее!)",
+                reply_markup=kb or main_menu_keyboard(),
+            )
+        else:
+            await message.answer(
+                f"📤 Первые 3 трека можно загрузить без оценок. "
+                f"После каждых 3 загруженных треков нужно оценить 5 чужих.\n\n"
+                f"Осталось оценок: {needed}/5\n\n"
+                f"Нажми «🎵 Голосовать», чтобы оценить треки.",
+                reply_markup=main_menu_keyboard(),
+            )
         return
 
     await state.set_state(UploadTrack.waiting_audio)
@@ -166,10 +178,12 @@ async def receive_title(message: Message, state: FSMContext) -> None:
         user.id, title=title, file_name=file_name, source_url=source_url
     )
     if dup:
-        if dup.get("replaced_count", 0) >= 1:
+        replacements_left = await get_free_replacements_left(user.id)
+        if replacements_left <= 0:
+            kb = pay_keyboard("replace")
             await message.answer(
-                "⚠️ Вы уже загружали этот трек. Он был заменён ранее — повторная замена невозможна.",
-                reply_markup=main_menu_keyboard(),
+                "⚠️ Вы уже загружали этот трек. Лимит замен исчерпан. Доп. замена — 29₽",
+                reply_markup=kb or main_menu_keyboard(),
             )
             await state.clear()
             return
@@ -183,7 +197,7 @@ async def receive_title(message: Message, state: FSMContext) -> None:
         )
         await message.answer(
             "⚠️ Вы его уже загружали. Хотите поменять файл?\n\n"
-            "Если замените — статистика трека (оценки) обнулится. Один трек можно заменить только раз.",
+            f"При замене статистика трека обнулится. Бесплатных замен осталось: {replacements_left}/3",
             reply_markup=_replace_confirm_keyboard(dup["track_id"]),
         )
         return

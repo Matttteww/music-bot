@@ -7,15 +7,18 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import MAX_AUDIO_SIZE_BYTES, is_soundcloud_url
+from handlers.payments import pay_keyboard
 from database import (
     get_user_tracks,
     get_user_tracks_replaceable,
     get_user_stats,
+    get_user_tracks_count,
     get_or_create_user,
     get_user_display_info,
     update_display_name,
     replace_track_and_reset_ratings,
     find_duplicate_track,
+    get_free_replacements_left,
 )
 from handlers.upload import _get_audio_file_id_and_size
 from keyboards import (
@@ -75,10 +78,13 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     disp = await get_user_display_info(user.id)
 
     name = html.quote(disp["display_name"] or disp["username"] or "Пользователь")
+    replacements_left = await get_free_replacements_left(user.id)
+    tracks_count = await get_user_tracks_count(user.id)
     lines = [
         f"👤 <b>Профиль</b>",
         f"Исполнитель: {name}",
         f"Смен ника осталось: {disp['changes_left']}/3",
+        f"Треков: {tracks_count} | Замен доступно: {replacements_left}",
         "",
         f"📊 <b>Рейтинг исполнителя:</b> {stats['artist_avg']}/10",
         f"📈 <b>Всего оценок:</b> {stats['total_ratings']}",
@@ -95,13 +101,12 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     if len(tracks) > 15:
         lines.append(f"  ... и ещё {len(tracks) - 15}")
 
-    replaceable = [t for t in tracks if t.get("replaced_count", 0) == 0]
     text = "\n".join(lines)
     await message.answer(
         text,
         reply_markup=profile_keyboard(
             disp["changes_left"],
-            has_tracks=len(replaceable) > 0,
+            has_tracks=len(tracks) > 0,
         ),
     )
 
@@ -170,8 +175,17 @@ async def start_replace_track(message: Message, state: FSMContext) -> None:
     tracks = await get_user_tracks_replaceable(user.id)
     if not tracks:
         await message.answer(
-            "Нет треков для замены. Один трек можно заменить только один раз.",
+            "У тебя нет треков для замены.",
             reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    replacements_left = await get_free_replacements_left(user.id)
+    if replacements_left <= 0:
+        kb = pay_keyboard("replace")
+        await message.answer(
+            "Лимит бесплатных замен исчерпан (3/3). Дополнительная замена — 29₽",
+            reply_markup=kb or main_menu_keyboard(),
         )
         return
 
@@ -207,11 +221,12 @@ async def replace_track_select(callback: CallbackQuery, state: FSMContext) -> No
 
     await state.update_data(replace_track_id=track_id)
     await state.set_state(ReplaceTrack.waiting_audio)
+    replacements_left = await get_free_replacements_left(user.id)
     try:
         await callback.message.edit_text(
             "Отправь новый аудиофайл (mp3, m4a, ogg) до 20 МБ\n"
             "или ссылку на SoundCloud.\n\n"
-            "⚠️ При замене статистика трека (оценки) обнулится.",
+            f"⚠️ При замене статистика трека обнулится. Осталось замен: {replacements_left}/3",
             reply_markup=None,
         )
     except Exception:

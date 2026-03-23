@@ -1,6 +1,6 @@
 """База данных для бота оценки треков."""
 import aiosqlite
-from config import DB_PATH
+from config import DB_PATH, FREE_TRACKS_LIMIT
 
 
 async def init_db() -> None:
@@ -86,12 +86,44 @@ async def _migrate_db() -> None:
         if "warnings_count" not in user_cols:
             await db.execute("ALTER TABLE users ADD COLUMN warnings_count INTEGER DEFAULT 0")
             await db.commit()
+        if "free_replacements_used" not in user_cols:
+            await db.execute("ALTER TABLE users ADD COLUMN free_replacements_used INTEGER DEFAULT 0")
+            await db.commit()
+        if "paid_replacements_used" not in user_cols:
+            await db.execute("ALTER TABLE users ADD COLUMN paid_replacements_used INTEGER DEFAULT 0")
+            await db.commit()
 
         # Таблица забаненных пользователей
         await db.execute("""
             CREATE TABLE IF NOT EXISTS banned_users (
                 user_id INTEGER PRIMARY KEY,
                 banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.commit()
+
+        # Покупки (оплаченные слоты)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS purchases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                product_type TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                amount INTEGER NOT NULL,
+                payment_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.commit()
+
+        # Ожидающие оплаты платежи (для проверки статуса)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS pending_payments (
+                payment_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                product_type TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         await db.commit()
@@ -182,31 +214,67 @@ async def get_ratings_given_count(user_id: int) -> int:
         return row[0] or 0
 
 
-async def can_user_upload(user_id: int) -> tuple[bool, int]:
+async def get_user_tracks_count(user_id: int) -> int:
+    """Количество треков пользователя (не удалённых)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM tracks WHERE user_id = ? AND COALESCE(deleted, 0) = 0",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] or 0
+
+
+async def get_paid_upload_slots(user_id: int) -> int:
+    """Оплаченные слоты для загрузки (1 за TRACK_39, 5 за PACK_5_159)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """SELECT product_type, SUM(quantity) FROM purchases
+               WHERE user_id = ? AND product_type IN ('TRACK_39', 'PACK_5_159')
+               GROUP BY product_type""",
+            (user_id,),
+        )
+        slots = 0
+        async for row in cursor:
+            if row[0] == "TRACK_39":
+                slots += row[1] or 0
+            elif row[0] == "PACK_5_159":
+                slots += (row[1] or 0) * 5
+        return slots
+
+
+async def can_user_upload(user_id: int) -> tuple[bool, int, str]:
     """
     Может ли пользователь загрузить трек.
-    Возвращает (can_upload, ratings_needed).
-    После каждых 3 загруженных треков нужно оценить 5 чужих.
+    Возвращает (can_upload, ratings_needed, block_reason).
+    10 треков бесплатно, далее — оплата. После каждых 3 загрузок нужно 5 оценок.
     """
+    tracks_count = await get_user_tracks_count(user_id)
+    paid_slots = await get_paid_upload_slots(user_id)
+    max_allowed = FREE_TRACKS_LIMIT + paid_slots
+
+    if tracks_count >= max_allowed:
+        return False, 0, "limit"  # Лимит треков, нужна оплата
+
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """SELECT last_upload_ratings_count, tracks_since_checkpoint
                FROM users WHERE user_id = ?""",
-            (user_id,)
+            (user_id,),
         )
         row = await cursor.fetchone()
         ratings_at_checkpoint = (row[0] or 0) if row else 0
         tracks_since = (row[1] or 0) if row else 0
+
     current = await get_ratings_given_count(user_id)
     diff = current - ratings_at_checkpoint
 
-    # Первые 3 трека — без оценок. После каждых 3 — нужно 5 оценок.
     if tracks_since in (0, 1, 2):
-        return (True, 0)
+        return True, 0, ""
     if tracks_since == 3:
         needed = max(0, 5 - diff)
-        return (needed == 0, needed)
-    return (False, 5)
+        return (needed == 0, needed, "" if needed == 0 else "ratings")
+    return False, 5, "ratings"
 
 
 async def update_after_upload(user_id: int) -> None:
@@ -306,6 +374,38 @@ async def find_duplicate_track(
         return dict(row) if row else None
 
 
+FREE_REPLACEMENTS_LIMIT = 3
+
+
+async def get_replacements_available(user_id: int) -> int:
+    """Сколько замен доступно: 3 бесплатных + оплаченные - использованные."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """SELECT COALESCE(free_replacements_used, 0), COALESCE(paid_replacements_used, 0)
+               FROM users WHERE user_id = ?""",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        free_used = row[0] if row else 0
+        paid_used = row[1] if row else 0
+
+        cursor = await db.execute(
+            """SELECT COALESCE(SUM(quantity), 0) FROM purchases
+               WHERE user_id = ? AND product_type = 'REPLACEMENT_29'""",
+            (user_id,),
+        )
+        paid_total = (await cursor.fetchone())[0] or 0
+
+    free_left = max(0, FREE_REPLACEMENTS_LIMIT - free_used)
+    paid_left = max(0, paid_total - paid_used)
+    return free_left + paid_left
+
+
+async def get_free_replacements_left(user_id: int) -> int:
+    """Сколько замен доступно (бесплатные + оплаченные)."""
+    return await get_replacements_available(user_id)
+
+
 async def replace_track_and_reset_ratings(
     track_id: int,
     user_id: int,
@@ -316,23 +416,50 @@ async def replace_track_and_reset_ratings(
 ) -> tuple[bool, str]:
     """
     Заменяет файл трека, обнуляет оценки.
-    Возвращает (success, message). Один трек можно заменить только один раз.
+    3 бесплатные замены на аккаунт. Возвращает (success, message).
     """
     fid = file_id if file_id else ""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            """SELECT user_id, COALESCE(replaced_count, 0) FROM tracks
-               WHERE track_id = ? AND COALESCE(deleted, 0) = 0""",
+            "SELECT user_id FROM tracks WHERE track_id = ? AND COALESCE(deleted, 0) = 0",
             (track_id,),
         )
         row = await cursor.fetchone()
         if not row or row[0] != user_id:
             return False, "Трек не найден."
-        if row[1] >= 1:
-            return False, "Этот трек уже был заменён. Заменить можно только один раз."
+
+        available = await get_replacements_available(user_id)
+        if available <= 0:
+            return False, (
+                f"Лимит замен исчерпан. Дополнительная замена — 29₽ "
+                "(оплата скоро будет доступна)."
+            )
+
+        free_used = 0
+        paid_used = 0
+        cursor = await db.execute(
+            """SELECT COALESCE(free_replacements_used, 0), COALESCE(paid_replacements_used, 0)
+               FROM users WHERE user_id = ?""",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        if row:
+            free_used, paid_used = row[0], row[1]
+
+        if free_used < FREE_REPLACEMENTS_LIMIT:
+            await db.execute(
+                "UPDATE users SET free_replacements_used = COALESCE(free_replacements_used, 0) + 1 WHERE user_id = ?",
+                (user_id,),
+            )
+        else:
+            await db.execute(
+                "UPDATE users SET paid_replacements_used = COALESCE(paid_replacements_used, 0) + 1 WHERE user_id = ?",
+                (user_id,),
+            )
+
         await db.execute(
-            """UPDATE tracks SET file_id = ?, source_url = ?, title = ?, file_name = ?,
-               replaced_count = 1 WHERE track_id = ?""",
+            """UPDATE tracks SET file_id = ?, source_url = ?, title = ?, file_name = ?
+               WHERE track_id = ?""",
             (fid, source_url or None, title, file_name or None, track_id),
         )
         await db.execute("DELETE FROM ratings WHERE track_id = ?", (track_id,))
@@ -358,6 +485,66 @@ async def add_track(
         )
         await db.commit()
         return cursor.lastrowid
+
+
+async def add_purchase(
+    user_id: int,
+    product_type: str,
+    amount: int,
+    payment_id: str,
+    quantity: int = 1,
+) -> None:
+    """Записать успешную покупку."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO purchases (user_id, product_type, quantity, amount, payment_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, product_type, quantity, amount, payment_id),
+        )
+        await db.commit()
+
+
+async def add_pending_payment(
+    payment_id: str,
+    user_id: int,
+    product_type: str,
+    amount: int,
+) -> None:
+    """Добавить ожидающий платёж."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO pending_payments (payment_id, user_id, product_type, amount)
+               VALUES (?, ?, ?, ?)""",
+            (payment_id, user_id, product_type, amount),
+        )
+        await db.commit()
+
+
+async def get_pending_payment(payment_id: str) -> dict | None:
+    """Получить ожидающий платёж."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM pending_payments WHERE payment_id = ?",
+            (payment_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def remove_pending_payment(payment_id: str) -> None:
+    """Удалить ожидающий платёж после обработки."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM pending_payments WHERE payment_id = ?", (payment_id,))
+        await db.commit()
+
+
+async def get_all_pending_payments() -> list[dict]:
+    """Все ожидающие платежи для проверки статуса."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM pending_payments")
+        return [dict(r) for r in await cursor.fetchall()]
 
 
 async def get_track(track_id: int) -> dict | None:
@@ -518,24 +705,8 @@ async def get_user_tracks(user_id: int) -> list[dict]:
 
 
 async def get_user_tracks_replaceable(user_id: int) -> list[dict]:
-    """Треки пользователя, которые ещё можно заменить (никогда не заменялись)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            """SELECT t.track_id, t.title, t.genre,
-                      COALESCE(r.avg_score, 0) as avg_score,
-                      COALESCE(r.rating_count, 0) as rating_count
-               FROM tracks t
-               LEFT JOIN (
-                   SELECT track_id, AVG(score) as avg_score, COUNT(*) as rating_count
-                   FROM ratings GROUP BY track_id
-               ) r ON t.track_id = r.track_id
-               WHERE t.user_id = ? AND COALESCE(t.deleted, 0) = 0
-               AND COALESCE(t.replaced_count, 0) = 0
-               ORDER BY t.created_at DESC""",
-            (user_id,)
-        )
-        return [dict(r) for r in await cursor.fetchall()]
+    """Все треки пользователя (для замены — лимит 3 бесплатно на аккаунт)."""
+    return await get_user_tracks(user_id)
 
 
 async def get_user_stats(user_id: int) -> dict:
