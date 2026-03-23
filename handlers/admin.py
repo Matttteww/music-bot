@@ -1,10 +1,12 @@
-"""Админ-команды: бан исполнителей, очистка треков."""
+"""Админ-команды: бан исполнителей, очистка треков. + fallback для необработанных апдейтов."""
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 
 from config import REPORT_CHAT_ID
 from database import ban_user, clear_all_tracks
+from keyboards import main_menu_keyboard
 
 router = Router(name="admin")
 
@@ -39,3 +41,19 @@ async def cmd_ban(message: Message) -> None:
         await message.answer(f"✅ Пользователь {user_id} заблокирован.")
     except ValueError:
         await message.answer("Укажи корректный user_id (число).")
+
+
+@router.message()
+async def fallback_unknown_message(message: Message, state: FSMContext) -> None:
+    """Любое сообщение, не попавшее в другие обработчики."""
+    await state.clear()
+    await message.answer(
+        "Используй кнопки меню для навигации 👇",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.callback_query()
+async def fallback_unknown_callback(callback: CallbackQuery) -> None:
+    """Любой callback, не попавший в другие обработчики (устаревшие кнопки и т.п.)."""
+    await callback.answer()

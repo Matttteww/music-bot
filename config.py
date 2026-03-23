@@ -22,8 +22,13 @@ PRICE_PACK_5 = 159
 PRICE_REPLACEMENT = 29
 MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_MB * 1024 * 1024
 ALLOWED_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".ogg")
-# Путь к БД. В Docker (/app) — всегда /tmp (единственное доступное для записи на Bothost FREE)
-DB_PATH = "/tmp/music_ratings.db" if os.path.exists("/app") else (os.getenv("DB_PATH") or "music_ratings.db")
+# Путь к БД. DB_PATH из env — приоритет (Volume на Basic+). Иначе /tmp в Docker, иначе music_ratings.db
+if os.getenv("DB_PATH"):
+    DB_PATH = os.getenv("DB_PATH")
+elif os.path.exists("/app"):
+    DB_PATH = "/tmp/music_ratings.db"
+else:
+    DB_PATH = "music_ratings.db"
 
 # Куда отправлять жалобы (chat_id админа @bigsomanii)
 REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "942340947")
