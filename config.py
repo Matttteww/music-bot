@@ -22,8 +22,13 @@ PRICE_PACK_5 = 159
 PRICE_REPLACEMENT = 29
 MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_MB * 1024 * 1024
 ALLOWED_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".ogg")
-# Путь к БД. На Bothost с Volume: задай DB_PATH=/data/music_ratings.db в переменных окружения
-DB_PATH = os.getenv("DB_PATH", "music_ratings.db")
+# Путь к БД. На Bothost задай DB_PATH в env. Иначе /tmp (запись в Docker) или music_ratings.db
+if os.getenv("DB_PATH"):
+    DB_PATH = os.getenv("DB_PATH", "music_ratings.db")
+elif os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+    DB_PATH = "/tmp/music_ratings.db"
+else:
+    DB_PATH = "music_ratings.db"
 
 # Куда отправлять жалобы (chat_id админа @bigsomanii)
 REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "942340947")
