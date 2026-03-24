@@ -5,8 +5,24 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database import get_top_tracks, get_top_artists, get_track, get_user_tracks, get_user_display_info
-from keyboards import ratings_menu_keyboard, back_to_ratings_keyboard, main_menu_keyboard, BTN_RATINGS, BTN_TOP_TRACKS, BTN_TOP_ARTISTS, BTN_BACK
+from database import (
+    get_top_tracks,
+    get_top_artists,
+    get_track,
+    get_user_tracks,
+    get_user_display_info,
+    get_user_favorites,
+)
+from keyboards import (
+    ratings_menu_keyboard,
+    back_to_ratings_keyboard,
+    main_menu_keyboard,
+    BTN_RATINGS,
+    BTN_TOP_TRACKS,
+    BTN_TOP_ARTISTS,
+    BTN_FAVORITES,
+    BTN_BACK,
+)
 
 router = Router(name="ratings")
 
@@ -67,11 +83,15 @@ async def show_top_tracks(message: Message, state: FSMContext) -> None:
         for i, t in enumerate(tracks, 1):
             avg = round(float(t.get('avg_score') or 0), 1)
             cnt = int(t.get('rating_count') or 0)
+            likes = int(t.get('likes_count') or 0)
             title_short = (t.get("title") or "?")[:35]
-            lines.append(f"{i}. {html.quote(t['title'])} — @{html.quote(t.get('username', 'unknown'))} ({avg}/10)")
+            lines.append(
+                f"{i}. {html.quote(t['title'])} — @{html.quote(t.get('username', 'unknown'))} "
+                f"({avg}/10, ❤️ {likes})"
+            )
             builder.row(
                 InlineKeyboardButton(
-                    text=f"🎵 {title_short}",
+                    text=f"🎵 {title_short} ({avg}/10 ❤️{likes})",
                     callback_data=f"listen:{t['track_id']}",
                 )
             )
@@ -97,11 +117,14 @@ async def show_top_artists(message: Message, state: FSMContext) -> None:
         builder = InlineKeyboardBuilder()
         for i, a in enumerate(artists, 1):
             cnt = int(a.get('total_ratings') or 0)
+            likes = int(a.get('total_likes') or 0)
             uname = a.get('username', 'unknown')
-            lines.append(f"{i}. @{html.quote(uname)} — {a['artist_avg']}/10 ({cnt} оценок)")
+            lines.append(
+                f"{i}. @{html.quote(uname)} — {a['artist_avg']}/10 ({cnt} оценок, ❤️ {likes})"
+            )
             builder.row(
                 InlineKeyboardButton(
-                    text=f"👤 @{uname[:25]}",
+                    text=f"👤 @{uname[:25]} ({a['artist_avg']}/10 ❤️{likes})",
                     callback_data=f"artist:{a['user_id']}",
                 )
             )
@@ -110,6 +133,47 @@ async def show_top_artists(message: Message, state: FSMContext) -> None:
         kb = builder.as_markup()
     await state.set_state(RatingsState.viewing)
     await message.answer(text, reply_markup=kb)
+
+
+@router.message(RatingsState.menu, F.text == BTN_FAVORITES)
+async def show_favorites(message: Message, state: FSMContext, bot: Bot) -> None:
+    """Показать избранные треки пользователя."""
+    user = message.from_user
+    if not user:
+        return
+
+    tracks = await get_user_favorites(user.id)
+    if not tracks:
+        await message.answer(
+            "❤️ <b>Избранные треки</b>\n\n"
+            "У тебя пока нет избранных треков.\n"
+            "Нажми «❤️ В избранное» при голосовании, чтобы добавить.",
+            reply_markup=back_to_ratings_keyboard(),
+        )
+        await state.set_state(RatingsState.viewing)
+        return
+
+    lines = ["❤️ <b>Избранные треки</b>\n\nНажми на трек, чтобы послушать:"]
+    builder = InlineKeyboardBuilder()
+    for t in tracks[:20]:
+        avg = round(float(t.get('avg_score') or 0), 1)
+        cnt = int(t.get('rating_count') or 0)
+        likes = int(t.get('likes_count') or 0)
+        title_short = (t.get("title") or "?")[:35]
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🎵 {title_short} ({avg}/10 ❤️{likes})",
+                callback_data=f"listen:{t['track_id']}",
+            )
+        )
+    if len(tracks) > 20:
+        builder.row(
+            InlineKeyboardButton(text=f"... ещё {len(tracks) - 20}", callback_data="noop"),
+        )
+    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ratings_back"))
+    text = "\n".join(lines)
+    await state.set_state(RatingsState.viewing)
+    await message.answer(text, reply_markup=builder.as_markup())
 
 
 @router.message(RatingsState.menu, F.text == BTN_BACK)
@@ -150,7 +214,7 @@ async def callback_listen_track(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.callback_query(F.data.startswith("artist:"))
 async def callback_artist_tracks(callback: CallbackQuery) -> None:
-    """Показать треки исполнителя."""
+    """Показать треки исполнителя со средним баллом."""
     user_id = int(callback.data.split(":")[1])
     tracks = await get_user_tracks(user_id)
     if not tracks:
@@ -158,12 +222,25 @@ async def callback_artist_tracks(callback: CallbackQuery) -> None:
         return
     disp = await get_user_display_info(user_id)
     uname = disp.get("display_name") or (f"@{disp['username']}" if disp.get("username") else "?")
+    # Средний балл исполнителя по трекам
+    artist_avg = 0.0
+    total_rated = 0
+    if tracks:
+        weighted = sum(
+            float(t.get("avg_score") or 0) * int(t.get("rating_count") or 0)
+            for t in tracks
+        )
+        total_rated = sum(int(t.get("rating_count") or 0) for t in tracks)
+        artist_avg = round(weighted / total_rated, 1) if total_rated else 0.0
     builder = InlineKeyboardBuilder()
     for t in tracks[:15]:
-        title_short = (t.get("title") or "?")[:35]
+        avg = round(float(t.get("avg_score") or 0), 1)
+        cnt = int(t.get("rating_count") or 0)
+        likes = int(t.get("likes_count") or 0)
+        title_short = (t.get("title") or "?")[:30]
         builder.row(
             InlineKeyboardButton(
-                text=f"🎵 {title_short}",
+                text=f"🎵 {title_short} — {avg}/10 ({cnt} оц., ❤️{likes})",
                 callback_data=f"listen:{t['track_id']}",
             )
         )
@@ -175,7 +252,11 @@ async def callback_artist_tracks(callback: CallbackQuery) -> None:
             )
         )
     builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ratings_back"))
-    text = f"👤 Треки {html.quote(uname)}\n\nНажми на трек, чтобы послушать:"
+    text = (
+        f"👤 <b>Треки {html.quote(uname)}</b>\n"
+        f"Средний балл: {artist_avg}/10 ({total_rated} оценок)\n\n"
+        "Нажми на трек, чтобы послушать:"
+    )
     try:
         await callback.message.edit_text(text, reply_markup=builder.as_markup())
     except Exception:

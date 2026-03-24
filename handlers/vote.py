@@ -14,6 +14,8 @@ from database import (
     get_user_display_info,
     delete_track_and_warn_artist,
     ban_user,
+    toggle_favorite,
+    is_track_in_favorites,
 )
 from keyboards import (
     rating_keyboard,
@@ -21,6 +23,8 @@ from keyboards import (
     BTN_VOTE,
     BTN_STOP_VOTE,
     BTN_REPORT,
+    BTN_FAVORITE_ADD,
+    BTN_FAVORITE_REMOVE,
     BTN_REPORT_1,
     BTN_REPORT_2,
     BTN_REPORT_3,
@@ -111,8 +115,11 @@ async def _send_report_to_admin(
         return False
 
 
-async def _send_track(message: Message, bot: Bot, track: dict, chat_id: int) -> None:
+async def _send_track(
+    message: Message, bot: Bot, track: dict, chat_id: int, user_id: int
+) -> None:
     """Отправить трек (аудио или сообщение со ссылкой SoundCloud)."""
+    in_fav = await is_track_in_favorites(user_id, track["track_id"])
     caption = _format_track_caption(
         track["title"],
         track.get("username") or "unknown",
@@ -122,14 +129,14 @@ async def _send_track(message: Message, bot: Bot, track: dict, chat_id: int) -> 
         await bot.send_message(
             chat_id=chat_id,
             text=caption,
-            reply_markup=rating_keyboard(),
+            reply_markup=rating_keyboard(in_favorites=in_fav),
         )
     else:
         await bot.send_audio(
             chat_id=chat_id,
             audio=track["file_id"],
             caption=caption,
-            reply_markup=rating_keyboard(),
+            reply_markup=rating_keyboard(in_favorites=in_fav),
         )
 
 
@@ -158,7 +165,33 @@ async def send_track_for_voting(message: Message, state: FSMContext, bot: Bot) -
 
     await state.set_state(VotingState.active)
     await state.update_data(track_id=track["track_id"])
-    await _send_track(message, bot, track, message.chat.id)
+    await _send_track(message, bot, track, message.chat.id, user.id)
+
+
+@router.message(VotingState.active, F.text.in_({BTN_FAVORITE_ADD, BTN_FAVORITE_REMOVE}))
+async def toggle_favorite_handler(message: Message, state: FSMContext, bot: Bot) -> None:
+    """Добавить/убрать трек из избранного."""
+    user = message.from_user
+    if not user:
+        return
+
+    data = await state.get_data()
+    track_id = data.get("track_id")
+    if not track_id:
+        return
+
+    ok, now_in_fav = await toggle_favorite(user.id, track_id)
+    if not ok:
+        return
+
+    if now_in_fav:
+        await message.answer("❤️ Добавлено в избранное")
+    else:
+        await message.answer("💔 Убрано из избранного")
+
+    track = await get_track(track_id)
+    if track:
+        await _send_track(message, bot, track, message.chat.id, user.id)
 
 
 @router.message(VotingState.active, F.text == BTN_STOP_VOTE)
@@ -238,8 +271,9 @@ async def report_reason_cancel(message: Message, state: FSMContext, bot: Bot) ->
     await state.set_state(VotingState.active)
     await state.update_data(track_id=track_id)
     track = await get_track(track_id)
-    if track:
-        await _send_track(message, bot, track, message.chat.id)
+    user = message.from_user
+    if track and user:
+        await _send_track(message, bot, track, message.chat.id, user.id)
     else:
         await state.clear()
         await message.answer("Выбери действие:", reply_markup=main_menu_keyboard())
@@ -258,6 +292,9 @@ async def report_other_reason(message: Message, state: FSMContext) -> None:
 @router.message(ReportState.custom, F.text == BTN_REPORT_CANCEL)
 async def report_cancel(message: Message, state: FSMContext, bot: Bot) -> None:
     """Отмена жалобы — вернуться к голосованию."""
+    user = message.from_user
+    if not user:
+        return
     data = await state.get_data()
     track_id = data.get("track_id")
     await state.set_state(VotingState.active)
@@ -265,7 +302,7 @@ async def report_cancel(message: Message, state: FSMContext, bot: Bot) -> None:
 
     track = await get_track(track_id)
     if track:
-        await _send_track(message, bot, track, message.chat.id)
+        await _send_track(message, bot, track, message.chat.id, user.id)
     else:
         await state.clear()
         await message.answer("Выбери действие:", reply_markup=main_menu_keyboard())
@@ -422,7 +459,7 @@ async def process_rating(message: Message, state: FSMContext, bot: Bot) -> None:
     track = await get_random_track_for_voting(user.id)
     if track:
         await state.update_data(track_id=track["track_id"])
-        await _send_track(message, bot, track, message.chat.id)
+        await _send_track(message, bot, track, message.chat.id, user.id)
     else:
         await state.clear()
         await message.answer(

@@ -10,6 +10,9 @@ BTN_PROFILE = "👤 Профиль"
 BTN_RATINGS = "🏆 Рейтинги"
 BTN_TOP_TRACKS = "🎵 ТОП треков"
 BTN_TOP_ARTISTS = "👤 ТОП исполнителей"
+BTN_FAVORITES = "❤️ Избранные треки"
+BTN_FAVORITE_ADD = "❤️ В избранное"
+BTN_FAVORITE_REMOVE = "💔 Убрать из избранного"
 BTN_BACK = "◀️ Назад"
 BTN_MAIN_MENU = "◀️ Главное меню"
 BTN_CHANGE_NICK = "✏️ Поменять ник"
@@ -46,16 +49,20 @@ def ratings_menu_keyboard() -> ReplyKeyboardMarkup:
         KeyboardButton(text=BTN_TOP_TRACKS),
         KeyboardButton(text=BTN_TOP_ARTISTS),
     )
+    builder.row(KeyboardButton(text=BTN_FAVORITES))
     builder.row(KeyboardButton(text=BTN_BACK))
     return builder.as_markup(resize_keyboard=True)
 
 
-def rating_keyboard() -> ReplyKeyboardMarkup:
-    """Кнопки оценки 1–10, пожаловаться и выход."""
+def rating_keyboard(in_favorites: bool = False) -> ReplyKeyboardMarkup:
+    """Кнопки оценки 1–10, лайк, пожаловаться и выход."""
     builder = ReplyKeyboardBuilder()
     for i in range(1, 11):
         builder.add(KeyboardButton(text=str(i)))
     builder.adjust(5, 5)
+    builder.row(
+        KeyboardButton(text=BTN_FAVORITE_REMOVE if in_favorites else BTN_FAVORITE_ADD),
+    )
     builder.row(KeyboardButton(text=BTN_REPORT))
     builder.row(KeyboardButton(text=BTN_STOP_VOTE))
     return builder.as_markup(resize_keyboard=True)

@@ -112,9 +112,10 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     for i, t in enumerate(tracks[:15], 1):
         avg = round(float(t.get('avg_score') or 0), 1)
         cnt = int(t.get('rating_count') or 0)
+        likes = int(t.get('likes_count') or 0)
         lines.append(
             f"  {i}. {html.quote(t['title'])} — "
-            f"{avg}/10 ({cnt} оценок)"
+            f"{avg}/10 ({cnt} оценок, ❤️ {likes})"
         )
     if len(tracks) > 15:
         lines.append(f"  ... и ещё {len(tracks) - 15}")

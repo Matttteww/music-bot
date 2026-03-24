@@ -115,6 +115,20 @@ async def _migrate_db() -> None:
         """)
         await db.commit()
 
+        # Избранное (лайки)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS favorites (
+                user_id INTEGER NOT NULL,
+                track_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, track_id),
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                FOREIGN KEY (track_id) REFERENCES tracks(track_id)
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_favorites_track ON favorites(track_id)")
+        await db.commit()
+
         # Покупки (оплаченные слоты)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS purchases (
@@ -673,6 +687,76 @@ async def delete_track_by_user(track_id: int, user_id: int) -> tuple[bool, str]:
         return True, row[1] or "Трек"
 
 
+async def toggle_favorite(user_id: int, track_id: int) -> tuple[bool, bool]:
+    """
+    Переключает трек в избранном. Возвращает (success, now_in_favorites).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM favorites WHERE user_id = ? AND track_id = ?",
+            (user_id, track_id),
+        )
+        exists = await cursor.fetchone()
+        if exists:
+            await db.execute(
+                "DELETE FROM favorites WHERE user_id = ? AND track_id = ?",
+                (user_id, track_id),
+            )
+            await db.commit()
+            return True, False
+        else:
+            await db.execute(
+                "INSERT OR IGNORE INTO favorites (user_id, track_id) VALUES (?, ?)",
+                (user_id, track_id),
+            )
+            await db.commit()
+            return True, True
+
+
+async def is_track_in_favorites(user_id: int, track_id: int) -> bool:
+    """Проверяет, есть ли трек в избранном у пользователя."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM favorites WHERE user_id = ? AND track_id = ?",
+            (user_id, track_id),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def get_track_likes_count(track_id: int) -> int:
+    """Количество лайков (добавлений в избранное) трека."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM favorites WHERE track_id = ?",
+            (track_id,),
+        )
+        return (await cursor.fetchone())[0] or 0
+
+
+async def get_user_favorites(user_id: int) -> list[dict]:
+    """Треки в избранном пользователя с рейтингами и лайками."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT t.track_id, t.title, t.file_id, t.source_url, t.user_id,
+                      COALESCE(NULLIF(u.display_name, ''), u.username) as username,
+                      COALESCE(r.avg_score, 0) as avg_score,
+                      COALESCE(r.rating_count, 0) as rating_count,
+                      (SELECT COUNT(*) FROM favorites WHERE track_id = t.track_id) as likes_count
+               FROM favorites f
+               JOIN tracks t ON f.track_id = t.track_id AND COALESCE(t.deleted, 0) = 0
+               JOIN users u ON t.user_id = u.user_id
+               LEFT JOIN (
+                   SELECT track_id, AVG(score) as avg_score, COUNT(*) as rating_count
+                   FROM ratings GROUP BY track_id
+               ) r ON t.track_id = r.track_id
+               WHERE f.user_id = ?
+               ORDER BY f.created_at DESC""",
+            (user_id,),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
 async def clear_all_tracks() -> int:
     """
     Удаляет все треки и оценки. Для очистки тестовых данных.
@@ -747,14 +831,15 @@ async def get_track_rating(track_id: int) -> tuple[float, int]:
 
 
 async def get_user_tracks(user_id: int) -> list[dict]:
-    """Возвращает список треков пользователя с рейтингами."""
+    """Возвращает список треков пользователя с рейтингами и лайками."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT t.track_id, t.title, t.genre,
                       COALESCE(r.avg_score, 0) as avg_score,
                       COALESCE(r.rating_count, 0) as rating_count,
-                      COALESCE(t.replaced_count, 0) as replaced_count
+                      COALESCE(t.replaced_count, 0) as replaced_count,
+                      (SELECT COUNT(*) FROM favorites WHERE track_id = t.track_id) as likes_count
                FROM tracks t
                LEFT JOIN (
                    SELECT track_id, AVG(score) as avg_score, COUNT(*) as rating_count
@@ -764,7 +849,11 @@ async def get_user_tracks(user_id: int) -> list[dict]:
                ORDER BY t.created_at DESC""",
             (user_id,)
         )
-        return [dict(r) for r in await cursor.fetchall()]
+        rows = await cursor.fetchall()
+        return [
+            {**dict(r), "likes_count": r["likes_count"] or 0}
+            for r in rows
+        ]
 
 
 async def get_user_tracks_replaceable(user_id: int) -> list[dict]:
@@ -797,13 +886,14 @@ async def get_user_stats(user_id: int) -> dict:
 
 
 async def get_top_tracks(limit: int = 10) -> list[dict]:
-    """ТОП треков по среднему баллу. Треки с >= 1 оценкой."""
+    """ТОП треков по среднему баллу. Треки с >= 1 оценкой. Лайки не влияют на рейтинг."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT t.track_id, t.title,
                       COALESCE(NULLIF(u.display_name, ''), u.username) as username,
-                      r.avg_score, r.rating_count
+                      r.avg_score, r.rating_count,
+                      (SELECT COUNT(*) FROM favorites WHERE track_id = t.track_id) as likes_count
                FROM tracks t
                JOIN users u ON t.user_id = u.user_id
                JOIN (
@@ -815,13 +905,20 @@ async def get_top_tracks(limit: int = 10) -> list[dict]:
                LIMIT ?""",
             (limit,)
         )
-        return [dict(r) for r in await cursor.fetchall()]
+        rows = await cursor.fetchall()
+        return [
+            {
+                **dict(r),
+                "likes_count": r["likes_count"] or 0,
+            }
+            for r in rows
+        ]
 
 
 async def get_top_artists(limit: int = 10) -> list[dict]:
     """
     ТОП исполнителей по среднему баллу всех треков.
-    Исполнители с >= 1 оценкой. Обновляется при каждой новой оценке.
+    Исполнители с >= 1 оценкой. Лайки не влияют на средний балл.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -842,12 +939,19 @@ async def get_top_artists(limit: int = 10) -> list[dict]:
             (limit,)
         )
         rows = await cursor.fetchall()
-        return [
-            {
+        result = []
+        for r in rows:
+            cur2 = await db.execute(
+                """SELECT COUNT(*) FROM favorites f
+                   JOIN tracks t ON f.track_id = t.track_id AND t.user_id = ? AND COALESCE(t.deleted, 0) = 0""",
+                (r["user_id"],)
+            )
+            total_likes = (await cur2.fetchone())[0] or 0
+            result.append({
                 "user_id": r["user_id"],
                 "username": r["username"],
                 "total_ratings": r["total_ratings"],
                 "artist_avg": round(float(r["artist_avg"]), 1),
-            }
-            for r in rows
-        ]
+                "total_likes": total_likes,
+            })
+        return result
