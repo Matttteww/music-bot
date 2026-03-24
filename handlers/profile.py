@@ -22,6 +22,7 @@ from database import (
     delete_track_by_user,
 )
 from handlers.upload import _get_audio_file_id_and_size
+from utils import pluralize_likes
 from keyboards import (
     profile_keyboard,
     main_menu_keyboard,
@@ -115,7 +116,7 @@ async def show_profile(message: Message, state: FSMContext) -> None:
         likes = int(t.get('likes_count') or 0)
         lines.append(
             f"  {i}. {html.quote(t['title'])} — "
-            f"{avg}/10 ({cnt} оценок, ❤️ {likes})"
+            f"{avg}/10 ({cnt} оценок, {pluralize_likes(likes)})"
         )
     if len(tracks) > 15:
         lines.append(f"  ... и ещё {len(tracks) - 15}")

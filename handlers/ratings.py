@@ -5,6 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from utils import pluralize_likes
 from database import (
     get_top_tracks,
     get_top_artists,
@@ -87,11 +88,11 @@ async def show_top_tracks(message: Message, state: FSMContext) -> None:
             title_short = (t.get("title") or "?")[:35]
             lines.append(
                 f"{i}. {html.quote(t['title'])} — @{html.quote(t.get('username', 'unknown'))} "
-                f"({avg}/10, ❤️ {likes})"
+                f"({avg}/10, {pluralize_likes(likes)})"
             )
             builder.row(
                 InlineKeyboardButton(
-                    text=f"🎵 {title_short} ({avg}/10 ❤️{likes})",
+                    text=f"🎵 {title_short} ({avg}/10, {pluralize_likes(likes)})",
                     callback_data=f"listen:{t['track_id']}",
                 )
             )
@@ -120,11 +121,11 @@ async def show_top_artists(message: Message, state: FSMContext) -> None:
             likes = int(a.get('total_likes') or 0)
             uname = a.get('username', 'unknown')
             lines.append(
-                f"{i}. @{html.quote(uname)} — {a['artist_avg']}/10 ({cnt} оценок, ❤️ {likes})"
+                f"{i}. @{html.quote(uname)} — {a['artist_avg']}/10 ({cnt} оценок, {pluralize_likes(likes)})"
             )
             builder.row(
                 InlineKeyboardButton(
-                    text=f"👤 @{uname[:25]} ({a['artist_avg']}/10 ❤️{likes})",
+                    text=f"👤 @{uname[:25]} ({a['artist_avg']}/10, {pluralize_likes(likes)})",
                     callback_data=f"artist:{a['user_id']}",
                 )
             )
@@ -147,7 +148,7 @@ async def show_favorites(message: Message, state: FSMContext, bot: Bot) -> None:
         await message.answer(
             "❤️ <b>Избранные треки</b>\n\n"
             "У тебя пока нет избранных треков.\n"
-            "Нажми «❤️ В избранное» при голосовании, чтобы добавить.",
+            "Нажми «В избранное» при голосовании, чтобы добавить.",
             reply_markup=back_to_ratings_keyboard(),
         )
         await state.set_state(RatingsState.viewing)
@@ -162,7 +163,7 @@ async def show_favorites(message: Message, state: FSMContext, bot: Bot) -> None:
         title_short = (t.get("title") or "?")[:35]
         builder.row(
             InlineKeyboardButton(
-                text=f"🎵 {title_short} ({avg}/10 ❤️{likes})",
+                text=f"🎵 {title_short} ({avg}/10, {pluralize_likes(likes)})",
                 callback_data=f"listen:{t['track_id']}",
             )
         )
@@ -240,7 +241,7 @@ async def callback_artist_tracks(callback: CallbackQuery) -> None:
         title_short = (t.get("title") or "?")[:30]
         builder.row(
             InlineKeyboardButton(
-                text=f"🎵 {title_short} — {avg}/10 ({cnt} оц., ❤️{likes})",
+                text=f"🎵 {title_short} — {avg}/10 ({cnt} оц., {pluralize_likes(likes)})",
                 callback_data=f"listen:{t['track_id']}",
             )
         )
