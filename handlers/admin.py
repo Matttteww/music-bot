@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from config import REPORT_CHAT_ID
-from database import ban_user, clear_all_tracks
+from database import ban_user, clear_all_tracks, get_admin_live_stats
 from keyboards import main_menu_keyboard
 
 router = Router(name="admin")
@@ -41,6 +41,21 @@ async def cmd_ban(message: Message) -> None:
         await message.answer(f"✅ Пользователь {user_id} заблокирован.")
     except ValueError:
         await message.answer("Укажи корректный user_id (число).")
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message) -> None:
+    """Статистика активности (только админ)."""
+    if not _is_admin(message.chat.id):
+        return
+
+    s = await get_admin_live_stats()
+    await message.answer(
+        "📊 <b>Статистика</b>\n\n"
+        f"🟢 Активны за последнюю минуту: <b>{s['active_last_minute']}</b>\n"
+        f"📤 Загружали хотя бы один трек: <b>{s['uploaders_count']}</b>\n"
+        f"⭐ Оценивали хотя бы один трек: <b>{s['raters_count']}</b>",
+    )
 
 
 @router.message()

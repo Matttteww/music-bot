@@ -105,6 +105,9 @@ async def _migrate_db() -> None:
         if "paid_replacements_used" not in user_cols:
             await db.execute("ALTER TABLE users ADD COLUMN paid_replacements_used INTEGER DEFAULT 0")
             await db.commit()
+        if "last_activity_at" not in user_cols:
+            await db.execute("ALTER TABLE users ADD COLUMN last_activity_at TEXT")
+            await db.commit()
 
         # Таблица забаненных пользователей
         await db.execute("""
@@ -179,6 +182,51 @@ async def get_or_create_user(user_id: int, username: str, full_name: str) -> boo
         )
         await db.commit()
         return True
+
+
+async def touch_user_activity(user_id: int, username: str = "", full_name: str = "") -> None:
+    """Обновить время последней активности (любое взаимодействие с ботом)."""
+    uname = (username or str(user_id))[:255]
+    fname = (full_name or "User")[:255]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO users (user_id, username, full_name, last_activity_at)
+               VALUES (?, ?, ?, datetime('now'))
+               ON CONFLICT(user_id) DO UPDATE SET last_activity_at = datetime('now')""",
+            (user_id, uname, fname),
+        )
+        await db.commit()
+
+
+async def get_admin_live_stats() -> dict[str, int]:
+    """
+    Статистика для админа:
+    - active_last_minute: пользователи с активностью за последнюю минуту
+    - uploaders_count: уникальные пользователи с хотя бы одним (не удалённым) треком
+    - raters_count: уникальные пользователи, поставившие хотя бы одну оценку
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """SELECT COUNT(*) FROM users
+               WHERE last_activity_at IS NOT NULL
+                 AND datetime(last_activity_at) >= datetime('now', '-1 minute')""",
+        )
+        active = (await cursor.fetchone())[0] or 0
+
+        cursor = await db.execute(
+            """SELECT COUNT(DISTINCT user_id) FROM tracks
+               WHERE COALESCE(deleted, 0) = 0""",
+        )
+        uploaders = (await cursor.fetchone())[0] or 0
+
+        cursor = await db.execute("SELECT COUNT(DISTINCT user_id) FROM ratings")
+        raters = (await cursor.fetchone())[0] or 0
+
+    return {
+        "active_last_minute": active,
+        "uploaders_count": uploaders,
+        "raters_count": raters,
+    }
 
 
 async def get_user_display_info(user_id: int) -> dict:
