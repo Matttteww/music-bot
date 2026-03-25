@@ -14,6 +14,7 @@ from handlers import start, profile, upload, vote, ratings, admin, stream
 # from handlers import payments  # ВРЕМЕННО ОТКЛЮЧЕНО: раскомментировать когда подключишь ЮKassa
 from activity_middleware import ActivityMiddleware
 from subscription import SubscriptionMiddleware
+from ban_middleware import BanMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +72,7 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.outer_middleware(ActivityMiddleware())
+    dp.update.outer_middleware(BanMiddleware(bot))
     dp.update.outer_middleware(SubscriptionMiddleware(bot))
 
     dp.include_router(start.router)

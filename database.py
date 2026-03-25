@@ -784,6 +784,16 @@ async def get_user_id_by_username(username: str) -> int | None:
         return int(row[0]) if row else None
 
 
+async def is_user_banned(user_id: int) -> bool:
+    """Проверяет, забанен ли пользователь."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM banned_users WHERE user_id = ? LIMIT 1",
+            (user_id,),
+        )
+        return (await cursor.fetchone()) is not None
+
+
 async def delete_track_and_warn_artist(track_id: int) -> tuple[bool, int | None, int]:
     """
     Удаляет трек (помечает deleted), добавляет предупреждение исполнителю.
