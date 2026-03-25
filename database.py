@@ -759,6 +759,17 @@ async def ban_user(user_id: int) -> None:
         await db.commit()
 
 
+async def unban_user(user_id: int) -> bool:
+    """Разбанить исполнителя. Возвращает True, если запись была удалена."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM banned_users WHERE user_id = ?",
+            (user_id,),
+        )
+        await db.commit()
+        return bool(cursor.rowcount)
+
+
 async def delete_track_and_warn_artist(track_id: int) -> tuple[bool, int | None, int]:
     """
     Удаляет трек (помечает deleted), добавляет предупреждение исполнителю.

@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from config import REPORT_CHAT_ID
-from database import ban_user, clear_all_tracks, get_admin_live_stats
+from database import ban_user, clear_all_tracks, get_admin_live_stats, unban_user
 from keyboards import main_menu_keyboard
 
 router = Router(name="admin")
@@ -41,6 +41,30 @@ async def cmd_ban(message: Message) -> None:
         await message.answer(f"✅ Пользователь {user_id} заблокирован.")
     except ValueError:
         await message.answer("Укажи корректный user_id (число).")
+
+
+@router.message(Command("unban"))
+async def cmd_unban(message: Message) -> None:
+    """Разбанить исполнителя: /unban <user_id>"""
+    if not _is_admin(message.chat.id):
+        return
+
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Использование: /unban <user_id>")
+        return
+
+    try:
+        user_id = int(args[1])
+    except ValueError:
+        await message.answer("Укажи корректный user_id (число).")
+        return
+
+    ok = await unban_user(user_id)
+    if ok:
+        await message.answer(f"✅ Пользователь {user_id} разбанен.")
+    else:
+        await message.answer(f"ℹ️ Пользователь {user_id} не был в бане.")
 
 
 @router.message(Command("stats"))
