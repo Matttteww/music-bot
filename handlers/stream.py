@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from aiogram import Bot, F, html, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -21,7 +22,10 @@ from database import (
     get_track,
     get_user_stream_submissions_count,
     get_user_tracks,
+    is_stream_active,
     review_stream_submission_admin,
+    start_stream,
+    stop_stream_and_skip_waiting,
 )
 from keyboards import (
     BTN_CANCEL,
@@ -37,6 +41,42 @@ class StreamAddState(StatesGroup):
     choosing_source = State()
     waiting_audio = State()
     waiting_title = State()
+
+
+def _is_stream_admin(chat_id: int) -> bool:
+    """Проверка: команда выполняется только в чате админа."""
+    return bool(REPORT_CHAT_ID) and str(chat_id) == str(REPORT_CHAT_ID)
+
+
+@router.message(Command("stream"))
+async def stream_command(message: Message) -> None:
+    """Админ управляет стрим-очередью.
+
+    Использование:
+    /stream start  — начать стрим (разрешить закидывать треки)
+    /stream stop   — остановить стрим (закрыть очередь: waiting -> skipped)
+    """
+    if not message.chat:
+        return
+    if not _is_stream_admin(message.chat.id):
+        return
+
+    parts = (message.text or "").split()
+    action = parts[1].lower() if len(parts) > 1 else ""
+
+    if action in ("start", "on"):
+        await start_stream()
+        await message.answer("🎙 Стрим запущен. Можно закидывать треки на оценку.")
+        return
+
+    if action in ("stop", "end", "off"):
+        skipped = await stop_stream_and_skip_waiting()
+        await message.answer(
+            f"🎙 Стрим остановлен. Очередь закрыта. Пропущено (waiting -> skipped): {skipped}"
+        )
+        return
+
+    await message.answer("Используй: /stream start или /stream stop")
 
 
 def _get_audio_file_id_and_size(message: Message) -> tuple[str | None, int | None, str | None]:
@@ -123,6 +163,15 @@ async def stream_add_start(message: Message, state: FSMContext) -> None:
     if not user:
         return
 
+    if not await is_stream_active():
+        await state.clear()
+        await message.answer(
+            "🎙 У bigsomani! стрим ещё не начался.\n"
+            "Подожди, пока стример запустит его командой: /stream start",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
     await state.clear()
     await state.set_state(StreamAddState.choosing_source)
     await get_or_create_user(
@@ -156,6 +205,14 @@ async def stream_pick_existing(callback: CallbackQuery, state: FSMContext) -> No
         await callback.answer()
         return
 
+    if not await is_stream_active():
+        await callback.answer(
+            "Стрим ещё не начался.",
+            show_alert=True,
+        )
+        await state.clear()
+        return
+
     await state.clear()
     tracks = await get_user_tracks(user.id)
     if not tracks:
@@ -186,6 +243,11 @@ async def stream_pick_new(callback: CallbackQuery, state: FSMContext) -> None:
     user = callback.from_user
     if not user:
         await callback.answer()
+        return
+
+    if not await is_stream_active():
+        await callback.answer("Стрим ещё не начался.", show_alert=True)
+        await state.clear()
         return
 
     await state.clear()
@@ -251,6 +313,14 @@ async def stream_receive_title(message: Message, state: FSMContext, bot: Bot) ->
         await state.clear()
         return
 
+    if not await is_stream_active():
+        await state.clear()
+        await message.answer(
+            "🎙 У bigsomani! стрим ещё не начался. Попробуй отправить трек позже.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
     title = (message.text or "").strip()
     if not title:
         await message.answer("Введи корректное название:")
@@ -285,6 +355,11 @@ async def stream_pick_track_callback(callback: CallbackQuery, state: FSMContext,
     user = callback.from_user
     if not user:
         await callback.answer()
+        return
+
+    if not await is_stream_active():
+        await callback.answer("Стрим ещё не начался.", show_alert=True)
+        await state.clear()
         return
 
     track_id = int(callback.data.split(":", 1)[1])

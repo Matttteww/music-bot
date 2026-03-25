@@ -118,6 +118,19 @@ async def _migrate_db() -> None:
         """)
         await db.commit()
 
+        # Флаг: идёт ли стрим (влияет на возможность добавлять треки в stream_queue).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS stream_meta (
+                id INTEGER PRIMARY KEY,
+                active INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute(
+            "INSERT OR IGNORE INTO stream_meta (id, active) VALUES (1, 0)"
+        )
+        await db.commit()
+
         # Оценки треков со стримов (отдельно от обычных ratings/top).
         # Пользователь отправляет трек админу, админ оценивает или пропускает.
         await db.execute("""
@@ -1026,6 +1039,46 @@ async def review_stream_submission_admin(
         if cursor.rowcount == 0:
             return False, "Эта запись уже оценена или не найдена."
         return True, "Готово."
+
+
+async def is_stream_active() -> bool:
+    """Стрим запущен (активен) или нет."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT active FROM stream_meta WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        return bool(row[0]) if row else False
+
+
+async def start_stream() -> None:
+    """Включить режим стрима (разрешить отправку треков на оценку)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE stream_meta SET active = 1, updated_at = datetime('now') WHERE id = 1"
+        )
+        await db.commit()
+
+
+async def stop_stream_and_skip_waiting() -> int:
+    """
+    Выключить режим стрима и закрыть очередь:
+    все позиции со статусом waiting переводим в skipped.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE stream_meta SET active = 0, updated_at = datetime('now') WHERE id = 1"
+        )
+        cursor = await db.execute(
+            """UPDATE stream_queue
+               SET status = 'skipped',
+                   score = NULL,
+                   reviewed_at = datetime('now')
+               WHERE status = 'waiting'"""
+        )
+        skipped_count = cursor.rowcount if cursor.rowcount is not None else 0
+        await db.commit()
+        return int(skipped_count)
 
 
 async def get_user_tracks(user_id: int) -> list[dict]:
