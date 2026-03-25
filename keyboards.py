@@ -89,16 +89,20 @@ def back_to_ratings_keyboard() -> ReplyKeyboardMarkup:
 def profile_keyboard(changes_left: int, has_tracks: bool = True) -> ReplyKeyboardMarkup:
     """Клавиатура профиля."""
     builder = ReplyKeyboardBuilder()
+    buttons: list[KeyboardButton] = []
     if changes_left > 0:
-        builder.row(KeyboardButton(text=BTN_CHANGE_NICK))
+        buttons.append(KeyboardButton(text=BTN_CHANGE_NICK))
     if has_tracks:
-        builder.row(
-            KeyboardButton(text=BTN_REPLACE_TRACK),
-            KeyboardButton(text=BTN_DELETE_TRACK),
-        )
-    builder.row(KeyboardButton(text=BTN_STREAM_ADD))
-    builder.row(KeyboardButton(text=BTN_STREAM_EVALS))
-    builder.row(KeyboardButton(text=BTN_MAIN_MENU))
+        buttons.append(KeyboardButton(text=BTN_REPLACE_TRACK))
+        buttons.append(KeyboardButton(text=BTN_DELETE_TRACK))
+    buttons.append(KeyboardButton(text=BTN_STREAM_ADD))
+    buttons.append(KeyboardButton(text=BTN_STREAM_EVALS))
+    buttons.append(KeyboardButton(text=BTN_MAIN_MENU))
+
+    for b in buttons:
+        builder.add(b)
+    # 2 колонки как в главном меню -> одинаковый размер кнопок.
+    builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 
 
