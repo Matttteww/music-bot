@@ -27,6 +27,10 @@ BTN_REPORT_3 = "3) Реклама запрещёнки"
 BTN_REPORT_4 = "4) Другая причина"
 BTN_REPORT_CANCEL = "◀️ Отмена"
 
+# Стрим-очередь
+BTN_STREAM_ADD = "🎙 Закинуть трек на стрим"
+BTN_STREAM_EVALS = "📺 Оценки с стримов"
+
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
     """Главное меню."""
@@ -92,6 +96,8 @@ def profile_keyboard(changes_left: int, has_tracks: bool = True) -> ReplyKeyboar
             KeyboardButton(text=BTN_REPLACE_TRACK),
             KeyboardButton(text=BTN_DELETE_TRACK),
         )
+    builder.row(KeyboardButton(text=BTN_STREAM_ADD))
+    builder.row(KeyboardButton(text=BTN_STREAM_EVALS))
     builder.row(KeyboardButton(text=BTN_MAIN_MENU))
     return builder.as_markup(resize_keyboard=True)
 

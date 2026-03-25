@@ -118,6 +118,31 @@ async def _migrate_db() -> None:
         """)
         await db.commit()
 
+        # Оценки треков со стримов (отдельно от обычных ratings/top).
+        # Пользователь отправляет трек админу, админ оценивает или пропускает.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS stream_queue (
+                stream_item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                file_id TEXT,
+                source_url TEXT,
+                status TEXT NOT NULL DEFAULT 'waiting'
+                    CHECK(status IN ('waiting', 'rated', 'skipped')),
+                score INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                FOREIGN KEY (sender_user_id) REFERENCES users(user_id)
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_stream_queue_sender ON stream_queue(sender_user_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_stream_queue_status ON stream_queue(status)"
+        )
+        await db.commit()
+
         # Избранное (лайки)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
@@ -917,6 +942,90 @@ async def get_track_rating(track_id: int) -> tuple[float, int]:
         row = await cursor.fetchone()
         avg, count = row[0] or 0, row[1] or 0
         return round(float(avg), 1) if count else 0.0, count
+
+
+async def add_stream_submission(
+    sender_user_id: int,
+    title: str,
+    file_id: str | None,
+    source_url: str | None,
+) -> int:
+    """Добавляет трек в очередь стрим-оценки (оценки не влияют на обычные рейтинги)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """INSERT INTO stream_queue (sender_user_id, title, file_id, source_url, status, score)
+               VALUES (?, ?, ?, ?, 'waiting', NULL)""",
+            (sender_user_id, title, file_id, source_url),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_user_stream_submissions_count(user_id: int) -> int:
+    """Сколько треков этого пользователя есть в очереди стрима."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM stream_queue WHERE sender_user_id = ?",
+            (user_id,),
+        )
+        return (await cursor.fetchone())[0] or 0
+
+
+async def get_user_stream_submissions(
+    user_id: int,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """Список треков пользователя из очереди стрима."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT stream_item_id, title, status, score, created_at
+               FROM stream_queue
+               WHERE sender_user_id = ?
+               ORDER BY created_at DESC
+               LIMIT ? OFFSET ?""",
+            (user_id, limit, offset),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_stream_submission(stream_item_id: int) -> dict | None:
+    """Получить одну стрим-сдачу (для админского оценивания)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT stream_item_id, sender_user_id, title, file_id, source_url, status, score
+               FROM stream_queue
+               WHERE stream_item_id = ?""",
+            (stream_item_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def review_stream_submission_admin(
+    stream_item_id: int,
+    score: int | None,
+) -> tuple[bool, str]:
+    """Оценить/пропустить трек со стрима (всё хранится в stream_queue)."""
+    if score is not None and not (0 <= score <= 10):
+        return False, "Некорректная оценка."
+
+    status = "skipped" if score is None else "rated"
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """UPDATE stream_queue
+               SET status = ?, score = ?, reviewed_at = datetime('now')
+               WHERE stream_item_id = ? AND status = 'waiting'""",
+            (status, score, stream_item_id),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            return False, "Эта запись уже оценена или не найдена."
+        return True, "Готово."
 
 
 async def get_user_tracks(user_id: int) -> list[dict]:

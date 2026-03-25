@@ -10,7 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, YOO_KASSA_ENABLED
 from database import init_db, get_all_pending_payments, add_purchase, remove_pending_payment
-from handlers import start, profile, upload, vote, ratings, admin
+from handlers import start, profile, upload, vote, ratings, admin, stream
 # from handlers import payments  # ВРЕМЕННО ОТКЛЮЧЕНО: раскомментировать когда подключишь ЮKassa
 from activity_middleware import ActivityMiddleware
 from subscription import SubscriptionMiddleware
@@ -79,6 +79,7 @@ async def main() -> None:
     dp.include_router(vote.router)
     dp.include_router(ratings.router)
     dp.include_router(admin.router)
+    dp.include_router(stream.router)
     # dp.include_router(payments.router)  # ВРЕМЕННО ОТКЛЮЧЕНО
 
     if YOO_KASSA_ENABLED:

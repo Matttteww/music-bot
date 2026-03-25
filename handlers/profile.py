@@ -13,6 +13,8 @@ from database import (
     get_user_tracks_replaceable,
     get_user_stats,
     get_user_tracks_count,
+    get_user_stream_submissions,
+    get_user_stream_submissions_count,
     get_or_create_user,
     get_user_display_info,
     update_display_name,
@@ -33,11 +35,13 @@ from keyboards import (
     BTN_REPLACE_TRACK,
     BTN_DELETE_TRACK,
     BTN_CANCEL,
+    BTN_STREAM_EVALS,
 )
 
 router = Router(name="profile")
 
 PROFILE_TRACKS_PER_PAGE = 10
+STREAM_SUBMISSIONS_PER_PAGE = 10
 
 
 class ChangeNick(StatesGroup):
@@ -137,6 +141,76 @@ def _format_profile_text(
     return "\n".join(lines)
 
 
+def _stream_evals_pagination_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    """Кнопки листания списка «оценки с стримов». """
+    builder = InlineKeyboardBuilder()
+    buttons: list[InlineKeyboardButton] = []
+    if page > 0:
+        buttons.append(
+            InlineKeyboardButton(
+                text="◀️ Назад",
+                callback_data=f"stream_prof_page:{page - 1}",
+            )
+        )
+    buttons.append(
+        InlineKeyboardButton(
+            text=f"📄 {page + 1}/{total_pages}",
+            callback_data="stream_prof_nop",
+        )
+    )
+    if page < total_pages - 1:
+        buttons.append(
+            InlineKeyboardButton(
+                text="Вперёд ▶️",
+                callback_data=f"stream_prof_page:{page + 1}",
+            )
+        )
+    builder.row(*buttons)
+    return builder.as_markup()
+
+
+def _format_stream_evals_text(
+    disp: dict,
+    items: list[dict],
+    total_items: int,
+    page: int,
+) -> str:
+    """Текст вкладки «Оценки с стримов»."""
+    name = html.quote(disp["display_name"] or disp["username"] or "Пользователь")
+    total_pages = max(
+        1, (total_items + STREAM_SUBMISSIONS_PER_PAGE - 1) // STREAM_SUBMISSIONS_PER_PAGE
+    )
+    page = max(0, min(page, total_pages - 1))
+    start = page * STREAM_SUBMISSIONS_PER_PAGE
+
+    lines = [
+        "🎙 <b>Оценки с стримов</b>",
+        f"Исполнитель: {name}",
+        f"Треков в стрим-очереди: {total_items}",
+        "",
+    ]
+
+    if not items:
+        lines.append("  (пока ничего не добавлял на стрим)")
+        return "\n".join(lines)
+
+    for i, item in enumerate(items, start=start + 1):
+        title = html.quote(item.get("title") or "?")
+        status = item.get("status")
+        score = item.get("score")
+        if status == "waiting":
+            status_line = "⏳ ждёт оценки"
+        elif status == "skipped":
+            status_line = "⏭️ пропуск"
+        else:
+            status_line = f"⭐️ {score}/10"
+
+        lines.append(f"  {i}. {title}")
+        lines.append(f"     ╰ {status_line}")
+
+    return "\n".join(lines)
+
+
 def _tracks_delete_keyboard(tracks: list[dict], page: int = 0) -> InlineKeyboardMarkup:
     """Inline-кнопки выбора трека для удаления (до 10 на страницу + листание)."""
     total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
@@ -212,6 +286,42 @@ async def show_profile(message: Message, state: FSMContext) -> None:
         await message.answer("Выбери действие:", reply_markup=pk)
     else:
         await message.answer(text, reply_markup=pk)
+
+
+@router.message(F.text == BTN_STREAM_EVALS)
+async def show_stream_evals(message: Message, state: FSMContext) -> None:
+    """Вкладка «Оценки с стримов»."""
+    user = message.from_user
+    if not user:
+        return
+
+    await state.clear()
+    await get_or_create_user(
+        user_id=user.id,
+        username=user.username or str(user.id),
+        full_name=user.full_name or "User",
+    )
+
+    disp = await get_user_display_info(user.id)
+    stream_total = await get_user_stream_submissions_count(user.id)
+    tracks_count = await get_user_tracks_count(user.id)
+    pk = profile_keyboard(disp["changes_left"], has_tracks=tracks_count > 0)
+
+    total_pages = max(
+        1,
+        (stream_total + STREAM_SUBMISSIONS_PER_PAGE - 1) // STREAM_SUBMISSIONS_PER_PAGE,
+    )
+    page = 0
+    items = await get_user_stream_submissions(
+        user.id,
+        limit=STREAM_SUBMISSIONS_PER_PAGE,
+        offset=page * STREAM_SUBMISSIONS_PER_PAGE,
+    )
+    text = _format_stream_evals_text(disp, items, total_items=stream_total, page=page)
+    kb = _stream_evals_pagination_keyboard(page, total_pages) if total_pages > 1 else None
+
+    await message.answer(text, reply_markup=kb)
+    await message.answer("Выбери действие:", reply_markup=pk)
 
 
 @router.message(F.text == BTN_CHANGE_NICK)
@@ -639,4 +749,49 @@ async def profile_page_turn(callback: CallbackQuery) -> None:
             await callback.message.edit_text(text, reply_markup=None)
         except Exception:
             pass
+    await callback.answer()
+
+
+@router.callback_query(F.data == "stream_prof_nop")
+async def stream_prof_page_nop(callback: CallbackQuery) -> None:
+    """Индикатор страницы — без действия."""
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("stream_prof_page:"))
+async def stream_prof_page_turn(callback: CallbackQuery) -> None:
+    """Перелистывание списка «оценки с стримов»."""
+    user = callback.from_user
+    if not user:
+        return
+
+    part = callback.data.split(":", 1)[1]
+    if not part.isdigit():
+        await callback.answer()
+        return
+    page = int(part)
+    if page < 0:
+        await callback.answer()
+        return
+
+    disp = await get_user_display_info(user.id)
+    stream_total = await get_user_stream_submissions_count(user.id)
+    total_pages = max(
+        1,
+        (stream_total + STREAM_SUBMISSIONS_PER_PAGE - 1) // STREAM_SUBMISSIONS_PER_PAGE,
+    )
+    page = min(page, total_pages - 1)
+
+    items = await get_user_stream_submissions(
+        user.id,
+        limit=STREAM_SUBMISSIONS_PER_PAGE,
+        offset=page * STREAM_SUBMISSIONS_PER_PAGE,
+    )
+    text = _format_stream_evals_text(disp, items, total_items=stream_total, page=page)
+    kb = _stream_evals_pagination_keyboard(page, total_pages) if total_pages > 1 else None
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        pass
     await callback.answer()
