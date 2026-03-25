@@ -124,27 +124,45 @@ async def show_top_artists(message: Message, state: FSMContext) -> None:
     artists = await get_top_artists(limit=10)
     if not artists:
         text = (
-            "👤 <b>ТОП исполнителей</b>\n\n"
+            "👤 <b>Топ исполнителей</b>\n\n"
             "Пока нет оценённых исполнителей. Голосуй — рейтинг появится!"
         )
         kb = back_to_ratings_keyboard()
     else:
-        lines = ["👤 <b>ТОП-10 исполнителей</b>\n\nНажми на исполнителя, чтобы послушать его треки:"]
+        user = message.from_user
+        uid = user.id if user else None
+        in_top = uid is not None and any(a.get("user_id") == uid for a in artists)
+
+        lines = [
+            "👤 <b>Топ исполнителей</b>",
+            "",
+            "Сортировка по среднему баллу по всем трекам. Жми кнопку — откроется список треков.",
+            "",
+        ]
         builder = InlineKeyboardBuilder()
         for i, a in enumerate(artists, 1):
-            cnt = int(a.get('total_ratings') or 0)
-            likes = int(a.get('total_likes') or 0)
-            uname = a.get('username', 'unknown')
+            cnt = int(a.get("total_ratings") or 0)
+            likes = int(a.get("total_likes") or 0)
+            avg = a["artist_avg"]
+            uname = a.get("username", "unknown")
+            uname_esc = html.quote(uname)
+            medal = "🥇 " if i == 1 else "🥈 " if i == 2 else "🥉 " if i == 3 else ""
+            lines.append(f"{medal}<b>{i}.</b> {uname_esc}")
             lines.append(
-                f"{i}. @{html.quote(uname)} — {a['artist_avg']}/10 ({cnt} оценок, {pluralize_likes(likes)})"
+                f"   ╰ 🎧 {pluralize_ratings(cnt)} · ⭐️ {avg} средний балл · {pluralize_likes(likes)}"
             )
+            lines.append("")
             builder.row(
                 InlineKeyboardButton(
-                    text=f"👤 @{uname[:25]} ({a['artist_avg']}/10, {pluralize_likes(likes)})",
+                    text=f"👤 @{uname[:25]} ({avg}/10, {pluralize_likes(likes)})",
                     callback_data=f"artist:{a['user_id']}",
                 )
             )
-        text = "\n".join(lines)
+        if not in_top:
+            lines.append(
+                "💡 Тебя пока нет в этом топе — качай средний балл и собирай оценки на треках."
+            )
+        text = "\n".join(lines).rstrip()
         builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ratings_back"))
         kb = builder.as_markup()
     await state.set_state(RatingsState.viewing)
