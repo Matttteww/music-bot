@@ -20,6 +20,7 @@ from database import (
     find_duplicate_track,
     get_free_replacements_left,
     delete_track_by_user,
+    get_artist_rank,
 )
 from handlers.upload import _get_audio_file_id_and_size
 from utils import pluralize_likes
@@ -90,6 +91,8 @@ def _format_profile_text(
     tracks_count: int,
     repl_text: str,
     page: int,
+    artist_rank: int | None,
+    artists_in_ranking: int,
 ) -> str:
     """Текст профиля: блок статистики + срез треков для страницы page."""
     name = html.quote(disp["display_name"] or disp["username"] or "Пользователь")
@@ -97,6 +100,17 @@ def _format_profile_text(
     page = max(0, min(page, total_pages - 1))
     start = page * PROFILE_TRACKS_PER_PAGE
     slice_tracks = tracks[start : start + PROFILE_TRACKS_PER_PAGE]
+
+    if artist_rank is not None and artists_in_ranking > 0:
+        rank_line = (
+            f"🏅 <b>Твоё место в рейтинге исполнителей:</b> {artist_rank} из {artists_in_ranking}"
+        )
+    elif artists_in_ranking == 0:
+        rank_line = "🏅 <b>Рейтинг исполнителей</b> пока пуст — ждём первых оценок."
+    else:
+        rank_line = (
+            "🏅 В рейтинге исполнителей появишься после первой оценки хотя бы одного трека."
+        )
 
     lines = [
         f"👤 <b>Профиль</b>",
@@ -106,6 +120,7 @@ def _format_profile_text(
         "",
         f"📊 <b>Рейтинг исполнителя:</b> {stats['artist_avg']}/10",
         f"📈 <b>Всего оценок:</b> {stats['total_ratings']}",
+        rank_line,
         "",
         f"🎵 <b>Мои треки ({len(tracks)}):</b> стр. {page + 1}/{total_pages}",
     ]
@@ -179,12 +194,16 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     stats = await get_user_stats(user.id)
     tracks = await get_user_tracks(user.id)
     disp = await get_user_display_info(user.id)
+    rank, artists_n = await get_artist_rank(user.id)
 
     replacements_left = await get_free_replacements_left(user.id)
     tracks_count = await get_user_tracks_count(user.id)
     repl_text = "∞" if UNLIMITED_MODE else str(replacements_left)
 
-    text = _format_profile_text(disp, stats, tracks, tracks_count, repl_text, page=0)
+    text = _format_profile_text(
+        disp, stats, tracks, tracks_count, repl_text, page=0,
+        artist_rank=rank, artists_in_ranking=artists_n,
+    )
     total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
     pk = profile_keyboard(disp["changes_left"], has_tracks=len(tracks) > 0)
 
@@ -600,8 +619,12 @@ async def profile_page_turn(callback: CallbackQuery) -> None:
     tracks_count = await get_user_tracks_count(user.id)
     replacements_left = await get_free_replacements_left(user.id)
     repl_text = "∞" if UNLIMITED_MODE else str(replacements_left)
+    rank, artists_n = await get_artist_rank(user.id)
 
-    text = _format_profile_text(disp, stats, tracks, tracks_count, repl_text, page=page)
+    text = _format_profile_text(
+        disp, stats, tracks, tracks_count, repl_text, page=page,
+        artist_rank=rank, artists_in_ranking=artists_n,
+    )
 
     if len(tracks) > PROFILE_TRACKS_PER_PAGE:
         try:

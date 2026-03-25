@@ -1003,3 +1003,33 @@ async def get_top_artists(limit: int = 10) -> list[dict]:
                 "total_likes": total_likes,
             })
         return result
+
+
+async def get_artist_rank(user_id: int) -> tuple[int | None, int]:
+    """
+    Место исполнителя в общем рейтинге (как в ТОП исполнителей, не только топ-10).
+    Возвращает (место с 1, число исполнителей в рейтинге) или (None, N), если нет оценённых треков.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """SELECT u.user_id,
+                      SUM(r.rating_count) as total_ratings,
+                      AVG(r.avg_score) as artist_avg
+               FROM users u
+               JOIN tracks t ON u.user_id = t.user_id AND COALESCE(t.deleted, 0) = 0
+               JOIN (
+                   SELECT track_id, AVG(score) as avg_score, COUNT(*) as rating_count
+                   FROM ratings GROUP BY track_id
+               ) r ON t.track_id = r.track_id
+               GROUP BY u.user_id
+               HAVING SUM(r.rating_count) >= 1
+               ORDER BY artist_avg DESC, total_ratings DESC""",
+        )
+        rows = await cursor.fetchall()
+    ordered_ids = [r[0] for r in rows]
+    total = len(ordered_ids)
+    try:
+        pos = ordered_ids.index(user_id) + 1
+    except ValueError:
+        return None, total
+    return pos, total
