@@ -938,7 +938,7 @@ async def get_top_tracks(limit: int = 10) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            """SELECT t.track_id, t.title,
+            """SELECT t.track_id, t.title, t.user_id,
                       COALESCE(NULLIF(u.display_name, ''), u.username) as username,
                       r.avg_score, r.rating_count,
                       (SELECT COUNT(*) FROM favorites WHERE track_id = t.track_id) as likes_count

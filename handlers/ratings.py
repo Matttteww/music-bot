@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from utils import pluralize_likes
+from utils import pluralize_likes, pluralize_ratings
 from database import (
     get_top_tracks,
     get_top_artists,
@@ -79,24 +79,39 @@ async def show_top_tracks(message: Message, state: FSMContext) -> None:
         )
         kb = back_to_ratings_keyboard()
     else:
-        lines = ["🎵 <b>ТОП-10 треков</b>\n\nНажми на трек, чтобы послушать:"]
+        user = message.from_user
+        uid = user.id if user else None
+        in_top = uid is not None and any(t.get("user_id") == uid for t in tracks)
+
+        lines = [
+            "🎵 <b>Топ треков</b>",
+            "",
+            "Ниже — лидеры по среднему баллу. Жми кнопку, чтобы послушать.",
+            "",
+        ]
         builder = InlineKeyboardBuilder()
         for i, t in enumerate(tracks, 1):
-            avg = round(float(t.get('avg_score') or 0), 1)
-            cnt = int(t.get('rating_count') or 0)
-            likes = int(t.get('likes_count') or 0)
+            avg = round(float(t.get("avg_score") or 0), 1)
+            cnt = int(t.get("rating_count") or 0)
+            likes = int(t.get("likes_count") or 0)
             title_short = (t.get("title") or "?")[:35]
+            medal = "🥇 " if i == 1 else "🥈 " if i == 2 else "🥉 " if i == 3 else ""
+            title_esc = html.quote(t.get("title") or "?")
+            artist_esc = html.quote(t.get("username") or "unknown")
+            lines.append(f"{medal}<b>{i}.</b> {title_esc} · {artist_esc}")
             lines.append(
-                f"{i}. {html.quote(t['title'])} — @{html.quote(t.get('username', 'unknown'))} "
-                f"({avg}/10, {pluralize_likes(likes)})"
+                f"   ╰ 🎧 {pluralize_ratings(cnt)} · ⭐️ {avg} средний балл · {pluralize_likes(likes)}"
             )
+            lines.append("")
             builder.row(
                 InlineKeyboardButton(
                     text=f"🎵 {title_short} ({avg}/10, {pluralize_likes(likes)})",
                     callback_data=f"listen:{t['track_id']}",
                 )
             )
-        text = "\n".join(lines)
+        if not in_top:
+            lines.append("💡 Пока ни один твой трек не в этом топе — зови слушателей и копи оценки.")
+        text = "\n".join(lines).rstrip()
         builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ratings_back"))
         kb = builder.as_markup()
     await state.set_state(RatingsState.viewing)
