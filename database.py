@@ -206,6 +206,8 @@ async def get_admin_live_stats() -> dict[str, int]:
     - total_users: всего записей в users
     - uploaders_count: уникальные пользователи с хотя бы одним (не удалённым) треком
     - tracks_total: все активные (не удалённые) треки
+    - rated_tracks_count: сколько треков получили хотя бы одну оценку
+    - total_track_ratings: сколько всего оценок (в таблице ratings) у активных треков
     - raters_count: уникальные пользователи, поставившие хотя бы одну оценку
     """
     async with aiosqlite.connect(DB_PATH) as db:
@@ -240,12 +242,30 @@ async def get_admin_live_stats() -> dict[str, int]:
         cursor = await db.execute("SELECT COUNT(DISTINCT user_id) FROM ratings")
         raters = (await cursor.fetchone())[0] or 0
 
+        cursor = await db.execute(
+            """SELECT COUNT(DISTINCT r.track_id)
+               FROM ratings r
+               JOIN tracks t ON t.track_id = r.track_id
+               WHERE COALESCE(t.deleted, 0) = 0""",
+        )
+        rated_tracks_count = (await cursor.fetchone())[0] or 0
+
+        cursor = await db.execute(
+            """SELECT COUNT(*)
+               FROM ratings r
+               JOIN tracks t ON t.track_id = r.track_id
+               WHERE COALESCE(t.deleted, 0) = 0""",
+        )
+        total_track_ratings = (await cursor.fetchone())[0] or 0
+
     return {
         "active_last_minute": active,
         "active_last_24h": active_24h,
         "total_users": total_users,
         "uploaders_count": uploaders,
         "tracks_total": tracks_total,
+        "rated_tracks_count": rated_tracks_count,
+        "total_track_ratings": total_track_ratings,
         "raters_count": raters,
     }
 
