@@ -202,6 +202,8 @@ async def get_admin_live_stats() -> dict[str, int]:
     """
     Статистика для админа:
     - active_last_minute: пользователи с активностью за последнюю минуту
+    - active_last_24h: за последние 24 часа (по last_activity_at)
+    - total_users: всего записей в users
     - uploaders_count: уникальные пользователи с хотя бы одним (не удалённым) треком
     - raters_count: уникальные пользователи, поставившие хотя бы одну оценку
     """
@@ -214,6 +216,16 @@ async def get_admin_live_stats() -> dict[str, int]:
         active = (await cursor.fetchone())[0] or 0
 
         cursor = await db.execute(
+            """SELECT COUNT(*) FROM users
+               WHERE last_activity_at IS NOT NULL
+                 AND datetime(last_activity_at) >= datetime('now', '-24 hours')""",
+        )
+        active_24h = (await cursor.fetchone())[0] or 0
+
+        cursor = await db.execute("SELECT COUNT(*) FROM users")
+        total_users = (await cursor.fetchone())[0] or 0
+
+        cursor = await db.execute(
             """SELECT COUNT(DISTINCT user_id) FROM tracks
                WHERE COALESCE(deleted, 0) = 0""",
         )
@@ -224,6 +236,8 @@ async def get_admin_live_stats() -> dict[str, int]:
 
     return {
         "active_last_minute": active,
+        "active_last_24h": active_24h,
+        "total_users": total_users,
         "uploaders_count": uploaders,
         "raters_count": raters,
     }

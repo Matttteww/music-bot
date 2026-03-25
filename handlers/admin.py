@@ -53,6 +53,8 @@ async def cmd_stats(message: Message) -> None:
     await message.answer(
         "📊 <b>Статистика</b>\n\n"
         f"🟢 Активны за последнюю минуту: <b>{s['active_last_minute']}</b>\n"
+        f"🕐 Активны за последние 24 часа: <b>{s['active_last_24h']}</b>\n"
+        f"👥 Всего пользователей бота: <b>{s['total_users']}</b>\n"
         f"📤 Загружали хотя бы один трек: <b>{s['uploaders_count']}</b>\n"
         f"⭐ Оценивали хотя бы один трек: <b>{s['raters_count']}</b>",
     )
