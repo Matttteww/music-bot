@@ -56,6 +56,7 @@ async def cmd_stats(message: Message) -> None:
         f"🕐 Активны за последние 24 часа: <b>{s['active_last_24h']}</b>\n"
         f"👥 Всего пользователей бота: <b>{s['total_users']}</b>\n"
         f"📤 Загружали хотя бы один трек: <b>{s['uploaders_count']}</b>\n"
+        f"🎵 Всего загруженных треков: <b>{s['tracks_total']}</b>\n"
         f"⭐ Оценивали хотя бы один трек: <b>{s['raters_count']}</b>",
     )
 
