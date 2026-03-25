@@ -48,35 +48,29 @@ def _is_stream_admin(chat_id: int) -> bool:
     return bool(REPORT_CHAT_ID) and str(chat_id) == str(REPORT_CHAT_ID)
 
 
-@router.message(Command("stream"))
-async def stream_command(message: Message) -> None:
-    """Админ управляет стрим-очередью.
-
-    Использование:
-    /stream start  — начать стрим (разрешить закидывать треки)
-    /stream stop   — остановить стрим (закрыть очередь: waiting -> skipped)
-    """
+@router.message(Command("streamon"))
+async def stream_on_cmd(message: Message) -> None:
+    """Админ запускает стрим: разрешает добавлять треки в стрим-очередь."""
     if not message.chat:
         return
     if not _is_stream_admin(message.chat.id):
         return
+    await start_stream()
+    await message.answer("🎙 Стрим запущен. Можно закидывать треки на оценку.")
 
-    parts = (message.text or "").split()
-    action = parts[1].lower() if len(parts) > 1 else ""
 
-    if action in ("start", "on"):
-        await start_stream()
-        await message.answer("🎙 Стрим запущен. Можно закидывать треки на оценку.")
+@router.message(Command("streanno"))
+@router.message(Command("streamoff"))
+async def stream_off_cmd(message: Message) -> None:
+    """Админ останавливает стрим: закрывает очередь waiting -> skipped."""
+    if not message.chat:
         return
-
-    if action in ("stop", "end", "off"):
-        skipped = await stop_stream_and_skip_waiting()
-        await message.answer(
-            f"🎙 Стрим остановлен. Очередь закрыта. Пропущено (waiting -> skipped): {skipped}"
-        )
+    if not _is_stream_admin(message.chat.id):
         return
-
-    await message.answer("Используй: /stream start или /stream stop")
+    skipped = await stop_stream_and_skip_waiting()
+    await message.answer(
+        f"🎙 Стрим остановлен. Очередь закрыта. Пропущено (waiting -> skipped): {skipped}"
+    )
 
 
 def _get_audio_file_id_and_size(message: Message) -> tuple[str | None, int | None, str | None]:
@@ -167,7 +161,7 @@ async def stream_add_start(message: Message, state: FSMContext) -> None:
         await state.clear()
         await message.answer(
             "🎙 У bigsomani! стрим ещё не начался.\n"
-            "Подожди, пока стример запустит его командой: /stream start",
+            "Подожди, пока стример запустит его командой: /streamon",
             reply_markup=main_menu_keyboard(),
         )
         return
