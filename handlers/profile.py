@@ -122,10 +122,15 @@ def _format_profile_text(
     return "\n".join(lines)
 
 
-def _tracks_delete_keyboard(tracks: list[dict]) -> InlineKeyboardMarkup:
-    """Inline-кнопки выбора трека для удаления."""
+def _tracks_delete_keyboard(tracks: list[dict], page: int = 0) -> InlineKeyboardMarkup:
+    """Inline-кнопки выбора трека для удаления (до 10 на страницу + листание)."""
+    total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PROFILE_TRACKS_PER_PAGE
+    slice_tracks = tracks[start : start + PROFILE_TRACKS_PER_PAGE]
+
     builder = InlineKeyboardBuilder()
-    for t in tracks[:20]:
+    for t in slice_tracks:
         title = (t.get("title") or "?")[:40]
         builder.row(
             InlineKeyboardButton(
@@ -133,8 +138,28 @@ def _tracks_delete_keyboard(tracks: list[dict]) -> InlineKeyboardMarkup:
                 callback_data=f"del_tr:{t['track_id']}",
             )
         )
+    if total_pages > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton(text="◀️ Назад", callback_data=f"del_page:{page - 1}")
+            )
+        nav.append(
+            InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="del_nop")
+        )
+        if page < total_pages - 1:
+            nav.append(
+                InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"del_page:{page + 1}")
+            )
+        builder.row(*nav)
     builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="del_tr:cancel"))
     return builder.as_markup()
+
+
+def _delete_tracks_prompt_text(page: int, total_pages: int) -> str:
+    if total_pages <= 1:
+        return "🗑 Выбери трек, который хочешь удалить:"
+    return f"🗑 Выбери трек для удаления (стр. {page + 1}/{total_pages}):"
 
 
 @router.message(F.text == BTN_PROFILE)
@@ -458,10 +483,53 @@ async def start_delete_track(message: Message, state: FSMContext) -> None:
         )
         return
 
-    await message.answer(
-        "Выбери трек, который хочешь удалить:",
-        reply_markup=_tracks_delete_keyboard(tracks),
-    )
+    total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
+    text = _delete_tracks_prompt_text(0, total_pages)
+    await message.answer(text, reply_markup=_tracks_delete_keyboard(tracks, 0))
+
+
+@router.callback_query(F.data == "del_nop")
+async def delete_list_page_nop(callback: CallbackQuery) -> None:
+    """Индикатор страницы в списке удаления."""
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("del_page:"))
+async def delete_track_page_turn(callback: CallbackQuery) -> None:
+    """Перелистывание списка треков для удаления."""
+    user = callback.from_user
+    if not user:
+        return
+
+    part = callback.data.split(":", 1)[1]
+    if not part.isdigit():
+        await callback.answer()
+        return
+    page = int(part)
+    if page < 0:
+        await callback.answer()
+        return
+
+    tracks = await get_user_tracks(user.id)
+    if not tracks:
+        try:
+            await callback.message.edit_text("У тебя нет треков.", reply_markup=None)
+        except Exception:
+            pass
+        await callback.answer()
+        return
+
+    total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
+    page = min(page, total_pages - 1)
+    text = _delete_tracks_prompt_text(page, total_pages)
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=_tracks_delete_keyboard(tracks, page),
+        )
+    except Exception:
+        pass
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("del_tr:"))
