@@ -1,11 +1,19 @@
 """Админ-команды: бан исполнителей, очистка треков. + fallback для необработанных апдейтов."""
+import re
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from config import REPORT_CHAT_ID
-from database import ban_user, clear_all_tracks, get_admin_live_stats, unban_user
+from database import (
+    ban_user,
+    clear_all_tracks,
+    get_admin_live_stats,
+    get_user_id_by_username,
+    unban_user,
+)
 from keyboards import main_menu_keyboard
 
 router = Router(name="admin")
@@ -26,45 +34,51 @@ async def cmd_cleartracks(message: Message) -> None:
 
 @router.message(Command("ban"))
 async def cmd_ban(message: Message) -> None:
-    """Забанить исполнителя: /ban <user_id>"""
+    """Забанить исполнителя по @username: /ban @name"""
     if not _is_admin(message.chat.id):
         return
 
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer("Использование: /ban <user_id>")
+    m = re.search(r"@([A-Za-z0-9_]{3,32})", message.text or "")
+    if not m:
+        await message.answer("Использование: /ban @username")
         return
 
     try:
-        user_id = int(args[1])
+        username = m.group(1)
+        user_id = await get_user_id_by_username(username)
+        if not user_id:
+            await message.answer(f"Пользователь @{username} не найден в базе.")
+            return
         await ban_user(user_id)
-        await message.answer(f"✅ Пользователь {user_id} заблокирован.")
-    except ValueError:
-        await message.answer("Укажи корректный user_id (число).")
+        await message.answer(f"✅ Забанен: @{username} (id: {user_id}).")
+    except Exception:
+        await message.answer("Ошибка обработки команды /ban.")
 
 
 @router.message(Command("unban"))
 async def cmd_unban(message: Message) -> None:
-    """Разбанить исполнителя: /unban <user_id>"""
+    """Разбанить исполнителя по @username: /unban @name"""
     if not _is_admin(message.chat.id):
         return
 
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer("Использование: /unban <user_id>")
+    m = re.search(r"@([A-Za-z0-9_]{3,32})", message.text or "")
+    if not m:
+        await message.answer("Использование: /unban @username")
         return
 
     try:
-        user_id = int(args[1])
-    except ValueError:
-        await message.answer("Укажи корректный user_id (число).")
-        return
-
-    ok = await unban_user(user_id)
-    if ok:
-        await message.answer(f"✅ Пользователь {user_id} разбанен.")
-    else:
-        await message.answer(f"ℹ️ Пользователь {user_id} не был в бане.")
+        username = m.group(1)
+        user_id = await get_user_id_by_username(username)
+        if not user_id:
+            await message.answer(f"Пользователь @{username} не найден в базе.")
+            return
+        ok = await unban_user(user_id)
+        if ok:
+            await message.answer(f"✅ Разбанен: @{username} (id: {user_id}).")
+        else:
+            await message.answer(f"ℹ️ @{username} не был в бане.")
+    except Exception:
+        await message.answer("Ошибка обработки команды /unban.")
 
 
 @router.message(Command("stats"))

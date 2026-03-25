@@ -770,6 +770,20 @@ async def unban_user(user_id: int) -> bool:
         return bool(cursor.rowcount)
 
 
+async def get_user_id_by_username(username: str) -> int | None:
+    """Найти user_id по Telegram username (без @)."""
+    username = (username or "").strip().lstrip("@")
+    if not username:
+        return None
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT user_id FROM users WHERE username = ? LIMIT 1",
+            (username,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else None
+
+
 async def delete_track_and_warn_artist(track_id: int) -> tuple[bool, int | None, int]:
     """
     Удаляет трек (помечает deleted), добавляет предупреждение исполнителю.
