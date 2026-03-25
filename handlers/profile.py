@@ -36,6 +36,8 @@ from keyboards import (
 
 router = Router(name="profile")
 
+PROFILE_TRACKS_PER_PAGE = 10
+
 
 class ChangeNick(StatesGroup):
     waiting_nick = State()
@@ -60,6 +62,64 @@ def _tracks_select_keyboard(tracks: list[dict]) -> InlineKeyboardMarkup:
         )
     builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="repl_tr:cancel"))
     return builder.as_markup()
+
+
+def _profile_pagination_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    """Кнопки листания списка треков в профиле."""
+    builder = InlineKeyboardBuilder()
+    buttons: list[InlineKeyboardButton] = []
+    if page > 0:
+        buttons.append(
+            InlineKeyboardButton(text="◀️ Назад", callback_data=f"prof_page:{page - 1}")
+        )
+    buttons.append(
+        InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="prof_nop")
+    )
+    if page < total_pages - 1:
+        buttons.append(
+            InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"prof_page:{page + 1}")
+        )
+    builder.row(*buttons)
+    return builder.as_markup()
+
+
+def _format_profile_text(
+    disp: dict,
+    stats: dict,
+    tracks: list[dict],
+    tracks_count: int,
+    repl_text: str,
+    page: int,
+) -> str:
+    """Текст профиля: блок статистики + срез треков для страницы page."""
+    name = html.quote(disp["display_name"] or disp["username"] or "Пользователь")
+    total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PROFILE_TRACKS_PER_PAGE
+    slice_tracks = tracks[start : start + PROFILE_TRACKS_PER_PAGE]
+
+    lines = [
+        f"👤 <b>Профиль</b>",
+        f"Исполнитель: {name}",
+        f"Смен ника осталось: {disp['changes_left']}/3",
+        f"Треков: {tracks_count} | Замен доступно: {repl_text}",
+        "",
+        f"📊 <b>Рейтинг исполнителя:</b> {stats['artist_avg']}/10",
+        f"📈 <b>Всего оценок:</b> {stats['total_ratings']}",
+        "",
+        f"🎵 <b>Мои треки ({len(tracks)}):</b> стр. {page + 1}/{total_pages}",
+    ]
+    for i, t in enumerate(slice_tracks, start=start + 1):
+        avg = round(float(t.get("avg_score") or 0), 1)
+        cnt = int(t.get("rating_count") or 0)
+        likes = int(t.get("likes_count") or 0)
+        lines.append(
+            f"  {i}. {html.quote(t['title'])} — "
+            f"{avg}/10 ({cnt} оценок, {pluralize_likes(likes)})"
+        )
+    if not slice_tracks:
+        lines.append("  (нет треков)")
+    return "\n".join(lines)
 
 
 def _tracks_delete_keyboard(tracks: list[dict]) -> InlineKeyboardMarkup:
@@ -95,40 +155,19 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     tracks = await get_user_tracks(user.id)
     disp = await get_user_display_info(user.id)
 
-    name = html.quote(disp["display_name"] or disp["username"] or "Пользователь")
     replacements_left = await get_free_replacements_left(user.id)
     tracks_count = await get_user_tracks_count(user.id)
     repl_text = "∞" if UNLIMITED_MODE else str(replacements_left)
-    lines = [
-        f"👤 <b>Профиль</b>",
-        f"Исполнитель: {name}",
-        f"Смен ника осталось: {disp['changes_left']}/3",
-        f"Треков: {tracks_count} | Замен доступно: {repl_text}",
-        "",
-        f"📊 <b>Рейтинг исполнителя:</b> {stats['artist_avg']}/10",
-        f"📈 <b>Всего оценок:</b> {stats['total_ratings']}",
-        "",
-        f"🎵 <b>Мои треки ({len(tracks)}):</b>",
-    ]
-    for i, t in enumerate(tracks[:15], 1):
-        avg = round(float(t.get('avg_score') or 0), 1)
-        cnt = int(t.get('rating_count') or 0)
-        likes = int(t.get('likes_count') or 0)
-        lines.append(
-            f"  {i}. {html.quote(t['title'])} — "
-            f"{avg}/10 ({cnt} оценок, {pluralize_likes(likes)})"
-        )
-    if len(tracks) > 15:
-        lines.append(f"  ... и ещё {len(tracks) - 15}")
 
-    text = "\n".join(lines)
-    await message.answer(
-        text,
-        reply_markup=profile_keyboard(
-            disp["changes_left"],
-            has_tracks=len(tracks) > 0,
-        ),
-    )
+    text = _format_profile_text(disp, stats, tracks, tracks_count, repl_text, page=0)
+    total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
+    pk = profile_keyboard(disp["changes_left"], has_tracks=len(tracks) > 0)
+
+    if len(tracks) > PROFILE_TRACKS_PER_PAGE:
+        await message.answer(text, reply_markup=_profile_pagination_keyboard(0, total_pages))
+        await message.answer("Выбери действие:", reply_markup=pk)
+    else:
+        await message.answer(text, reply_markup=pk)
 
 
 @router.message(F.text == BTN_CHANGE_NICK)
@@ -460,3 +499,53 @@ async def delete_track_callback(callback: CallbackQuery) -> None:
         await callback.answer()
     else:
         await callback.answer(result, show_alert=True)
+
+
+@router.callback_query(F.data == "prof_nop")
+async def profile_page_nop(callback: CallbackQuery) -> None:
+    """Индикатор страницы — без действия."""
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("prof_page:"))
+async def profile_page_turn(callback: CallbackQuery) -> None:
+    """Перелистывание списка треков в профиле."""
+    user = callback.from_user
+    if not user:
+        return
+
+    part = callback.data.split(":", 1)[1]
+    if not part.isdigit():
+        await callback.answer()
+        return
+    page = int(part)
+    if page < 0:
+        await callback.answer()
+        return
+
+    tracks = await get_user_tracks(user.id)
+    total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
+    page = min(page, total_pages - 1)
+
+    stats = await get_user_stats(user.id)
+    disp = await get_user_display_info(user.id)
+    tracks_count = await get_user_tracks_count(user.id)
+    replacements_left = await get_free_replacements_left(user.id)
+    repl_text = "∞" if UNLIMITED_MODE else str(replacements_left)
+
+    text = _format_profile_text(disp, stats, tracks, tracks_count, repl_text, page=page)
+
+    if len(tracks) > PROFILE_TRACKS_PER_PAGE:
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=_profile_pagination_keyboard(page, total_pages),
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            await callback.message.edit_text(text, reply_markup=None)
+        except Exception:
+            pass
+    await callback.answer()
