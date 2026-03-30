@@ -51,6 +51,7 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
     current = data.get("current_round") or []
     nxt = data.get("next_round") or []
     round_no = int(data.get("round_no") or 1)
+    display_round = int(data.get("display_round") or 1)
 
     while len(current) < 2:
         if len(current) == 1:
@@ -113,7 +114,10 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
     if not left or not right:
         return await _next_match_or_finish(state, bot, chat_id)
 
-    await bot.send_message(chat_id, f"⚔️ <b>Раунд {round_no}</b>\nСлушай 2 трека и выбери лучший:")
+    round_msg = await bot.send_message(
+        chat_id,
+        f"⚔️ <b>Раунд {display_round}</b>\nСлушай 2 трека и выбери лучший:",
+    )
     msg1_id = await _send_track_preview(bot, chat_id, 1, left)
     msg2_id = await _send_track_preview(bot, chat_id, 2, right)
     choice_msg = await bot.send_message(
@@ -122,7 +126,8 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
         reply_markup=_pair_keyboard(left_id, right_id).as_markup(),
     )
     await state.update_data(
-        current_pair_msg_ids=[msg1_id, msg2_id, choice_msg.message_id],
+        current_pair_msg_ids=[round_msg.message_id, msg1_id, msg2_id, choice_msg.message_id],
+        display_round=display_round + 1,
     )
     return False
 
@@ -149,6 +154,7 @@ async def start_king(message: Message, state: FSMContext, bot: Bot) -> None:
         current_round=track_ids,
         next_round=[],
         round_no=1,
+        display_round=1,
         current_pair=[],
         current_pair_msg_ids=[],
         chooser_user_id=user.id,
