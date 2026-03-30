@@ -47,12 +47,14 @@ class ReportState(StatesGroup):
 
 
 def _format_track_caption(title: str, username: str, source_url: str | None = None) -> str:
+    safe_title = html.quote(title or "?")
+    safe_username = html.quote(username or "unknown")
     text = (
-        f"🎵 <b>{title}</b>\n"
-        f"Исполнитель: @{username}\n\n"
+        f"🎵 <b>{safe_title}</b>\n"
+        f"Исполнитель: @{safe_username}\n\n"
     )
     if source_url:
-        text += f'🔗 <a href="{source_url}">Слушать на SoundCloud</a>\n\n'
+        text += f'🔗 <a href="{html.quote(source_url)}">Слушать на SoundCloud</a>\n\n'
     text += "Оцени трек от 1 до 10 (нажми кнопку):"
     return text
 
