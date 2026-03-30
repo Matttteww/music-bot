@@ -114,7 +114,10 @@ async def fallback_unknown_message(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query()
+@router.callback_query(
+    ~F.data.startswith("stream_"),
+    ~F.data.startswith("king_"),
+)
 async def fallback_unknown_callback(callback: CallbackQuery) -> None:
     """Любой callback, не попавший в другие обработчики (устаревшие кнопки и т.п.)."""
     await callback.answer()
