@@ -2,7 +2,7 @@
 import re
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -102,6 +102,7 @@ async def cmd_stats(message: Message) -> None:
 
 
 @router.message(
+    StateFilter(None),
     ~F.text.in_({BTN_STREAM_ADD, BTN_STREAM_EVALS, BTN_KING}),
     ~F.text.regexp(r"^/(streamon|streamoff|streanno)(@.+)?$"),
 )
@@ -115,6 +116,7 @@ async def fallback_unknown_message(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(
+    StateFilter(None),
     ~F.data.startswith("stream_"),
     ~F.data.startswith("king_"),
 )
