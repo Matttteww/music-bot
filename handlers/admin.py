@@ -1,7 +1,7 @@
 """Админ-команды: бан исполнителей, очистка треков. + fallback для необработанных апдейтов."""
 import re
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -14,7 +14,7 @@ from database import (
     get_user_id_by_username,
     unban_user,
 )
-from keyboards import main_menu_keyboard
+from keyboards import main_menu_keyboard, BTN_STREAM_ADD, BTN_STREAM_EVALS
 
 router = Router(name="admin")
 
@@ -101,7 +101,10 @@ async def cmd_stats(message: Message) -> None:
     )
 
 
-@router.message()
+@router.message(
+    ~F.text.in_({BTN_STREAM_ADD, BTN_STREAM_EVALS}),
+    ~F.text.regexp(r"^/(streamon|streamoff|streanno)(@.+)?$"),
+)
 async def fallback_unknown_message(message: Message, state: FSMContext) -> None:
     """Любое сообщение, не попавшее в другие обработчики."""
     await state.clear()
