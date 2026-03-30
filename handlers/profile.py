@@ -124,6 +124,7 @@ def _format_profile_text(
         "",
         f"📊 <b>Рейтинг исполнителя:</b> {stats['artist_avg']}/10",
         f"📈 <b>Всего оценок:</b> {stats['total_ratings']}",
+        f"👑 <b>Побед в «Царь SoundCloud'а»:</b> {int(stats.get('king_wins') or 0)}",
         rank_line,
         "",
         f"🎵 <b>Мои треки ({len(tracks)}):</b> стр. {page + 1}/{total_pages}",

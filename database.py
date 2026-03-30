@@ -108,6 +108,9 @@ async def _migrate_db() -> None:
         if "last_activity_at" not in user_cols:
             await db.execute("ALTER TABLE users ADD COLUMN last_activity_at TEXT")
             await db.commit()
+        if "king_wins" not in user_cols:
+            await db.execute("ALTER TABLE users ADD COLUMN king_wins INTEGER DEFAULT 0")
+            await db.commit()
 
         # Таблица забаненных пользователей
         await db.execute("""
@@ -1164,11 +1167,46 @@ async def get_user_stats(user_id: int) -> dict:
             (user_id,)
         )
         row = await cursor.fetchone()
+        cursor = await db.execute(
+            "SELECT COALESCE(king_wins, 0) FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        wins_row = await cursor.fetchone()
         return {
             "tracks_count": row["tracks_count"] or 0,
             "total_ratings": row["total_ratings"] or 0,
             "artist_avg": round(float(row["artist_avg"] or 0), 1),
+            "king_wins": (wins_row[0] if wins_row else 0) or 0,
         }
+
+
+async def get_king_tournament_tracks(user_id: int, limit: int = 10) -> list[dict]:
+    """Случайные треки для режима «Царь SoundCloud'а»."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT t.track_id, t.user_id, t.title, t.file_id, t.source_url,
+                      COALESCE(NULLIF(u.display_name, ''), u.username) as username
+               FROM tracks t
+               JOIN users u ON t.user_id = u.user_id
+               WHERE COALESCE(t.deleted, 0) = 0
+                 AND t.user_id != ?
+                 AND t.user_id NOT IN (SELECT user_id FROM banned_users)
+               ORDER BY RANDOM()
+               LIMIT ?""",
+            (user_id, limit),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def add_king_win(user_id: int) -> None:
+    """+1 победа в режиме «Царь SoundCloud'а» для исполнителя."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET king_wins = COALESCE(king_wins, 0) + 1 WHERE user_id = ?",
+            (user_id,),
+        )
+        await db.commit()
 
 
 async def get_top_tracks(limit: int = 10) -> list[dict]:

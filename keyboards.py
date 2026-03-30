@@ -8,6 +8,7 @@ BTN_VOTE = "🎵 Голосовать"
 BTN_UPLOAD = "📤 Загрузить трек"
 BTN_PROFILE = "👤 Профиль"
 BTN_RATINGS = "🏆 Рейтинги"
+BTN_KING = "👑 Царь SoundCloud'а"
 BTN_TOP_TRACKS = "🎵 ТОП треков"
 BTN_TOP_ARTISTS = "👤 ТОП исполнителей"
 BTN_FAVORITES = "❤️ Избранные треки"
@@ -43,6 +44,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         KeyboardButton(text=BTN_PROFILE),
         KeyboardButton(text=BTN_RATINGS),
     )
+    builder.row(KeyboardButton(text=BTN_KING))
     return builder.as_markup(resize_keyboard=True)
 
 
