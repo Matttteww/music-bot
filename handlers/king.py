@@ -30,17 +30,19 @@ def _pair_keyboard(left_id: int, right_id: int) -> InlineKeyboardBuilder:
     return builder
 
 
-async def _send_track_preview(bot: Bot, chat_id: int, idx: int, track: dict) -> None:
+async def _send_track_preview(bot: Bot, chat_id: int, idx: int, track: dict) -> int:
     title = html.quote(track.get("title") or "?")
     artist = html.quote(track.get("username") or "unknown")
     caption = f"🎵 <b>Трек {idx}</b>\n{title}\nИсполнитель: {artist}"
     if track.get("source_url"):
-        await bot.send_message(
+        msg = await bot.send_message(
             chat_id=chat_id,
-            text=caption + f"\n🔗 <a href=\"{track['source_url']}\">Слушать на SoundCloud</a>",
+            text=caption + f"\n🔗 <a href=\"{html.quote(track['source_url'])}\">Слушать на SoundCloud</a>",
         )
+        return msg.message_id
     else:
-        await bot.send_audio(chat_id=chat_id, audio=track["file_id"], caption=caption)
+        msg = await bot.send_audio(chat_id=chat_id, audio=track["file_id"], caption=caption)
+        return msg.message_id
 
 
 async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bool:
@@ -65,6 +67,8 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
 
                 winner_user_id = int(winner_track["user_id"])
                 await add_king_win(winner_user_id)
+                chooser_id = int(data.get("chooser_user_id") or chat_id)
+                chooser_name = data.get("chooser_name") or str(chooser_id)
 
                 # Уведомление победителю-исполнителю
                 winner_disp = await get_user_display_info(winner_user_id)
@@ -79,7 +83,9 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
                 try:
                     await bot.send_message(
                         winner_user_id,
-                        "🏆 Твой трек победил в «Царь SoundCloud'а»!\n"
+                        "🏆 Твой трек победил в «Царь SoundCloud'а»!\n\n"
+                        f"Трек: <b>{html.quote(winner_track.get('title') or '?')}</b>\n"
+                        f"Выбрал победителем: {html.quote(str(chooser_name))}\n\n"
                         "Тебе засчитана +1 победа в профиле.",
                     )
                 except Exception:
@@ -108,12 +114,15 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
         return await _next_match_or_finish(state, bot, chat_id)
 
     await bot.send_message(chat_id, f"⚔️ <b>Раунд {round_no}</b>\nСлушай 2 трека и выбери лучший:")
-    await _send_track_preview(bot, chat_id, 1, left)
-    await _send_track_preview(bot, chat_id, 2, right)
-    await bot.send_message(
+    msg1_id = await _send_track_preview(bot, chat_id, 1, left)
+    msg2_id = await _send_track_preview(bot, chat_id, 2, right)
+    choice_msg = await bot.send_message(
         chat_id=chat_id,
         text="Выбери победителя пары:",
         reply_markup=_pair_keyboard(left_id, right_id).as_markup(),
+    )
+    await state.update_data(
+        current_pair_msg_ids=[msg1_id, msg2_id, choice_msg.message_id],
     )
     return False
 
@@ -141,6 +150,9 @@ async def start_king(message: Message, state: FSMContext, bot: Bot) -> None:
         next_round=[],
         round_no=1,
         current_pair=[],
+        current_pair_msg_ids=[],
+        chooser_user_id=user.id,
+        chooser_name=(user.username and f"@{user.username}") or (user.full_name or f"id{user.id}"),
     )
     await message.answer(
         "👑 <b>Царь SoundCloud'а</b>\n"
@@ -182,6 +194,14 @@ async def king_pick(callback: CallbackQuery, state: FSMContext, bot: Bot) -> Non
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+
+    # Удаляем сообщения пары, чтобы чат не засорялся.
+    for mid in data.get("current_pair_msg_ids") or []:
+        try:
+            await bot.delete_message(callback.message.chat.id, int(mid))
+        except Exception:
+            pass
+    await state.update_data(current_pair_msg_ids=[])
 
     await callback.answer("Выбор принят!")
     await _next_match_or_finish(state, bot, callback.message.chat.id)
