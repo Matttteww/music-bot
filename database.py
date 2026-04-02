@@ -111,6 +111,11 @@ async def _migrate_db() -> None:
         if "king_wins" not in user_cols:
             await db.execute("ALTER TABLE users ADD COLUMN king_wins INTEGER DEFAULT 0")
             await db.commit()
+        if "last_reengagement_sent_at" not in user_cols:
+            await db.execute(
+                "ALTER TABLE users ADD COLUMN last_reengagement_sent_at TEXT"
+            )
+            await db.commit()
 
         # Таблица забаненных пользователей
         await db.execute("""
@@ -197,6 +202,47 @@ async def _migrate_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.commit()
+
+
+async def fetch_users_for_reengagement(idle_minutes: int) -> list[int]:
+    """
+    Пользователи без активности не менее idle_minutes минут, ещё без напоминания
+    за текущий период неактивности (после нового захода можно снова один раз).
+
+    Сравнение через julianday — стабильнее, чем datetime('now', ?) с модификатором.
+    """
+    m = float(max(1, int(idle_minutes)))
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT user_id FROM users
+            WHERE last_activity_at IS NOT NULL
+              AND TRIM(last_activity_at) != ''
+              AND (julianday('now') - julianday(last_activity_at)) * 24 * 60 >= ?
+              AND (
+                last_reengagement_sent_at IS NULL
+                OR TRIM(last_reengagement_sent_at) = ''
+                OR julianday(last_reengagement_sent_at) < julianday(last_activity_at)
+              )
+              AND user_id NOT IN (SELECT user_id FROM banned_users)
+            """,
+            (m,),
+        )
+        rows = await cursor.fetchall()
+        return [int(r[0]) for r in rows]
+
+
+async def mark_reengagement_sent(user_id: int) -> None:
+    """Фиксирует отправку напоминания (не дублировать, пока снова не будет активности)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE users SET last_reengagement_sent_at = datetime('now')
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        )
         await db.commit()
 
 

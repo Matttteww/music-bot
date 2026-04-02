@@ -33,6 +33,18 @@ else:
 # Куда отправлять жалобы (chat_id админа @bigsomanii)
 REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "942340947")
 
+# Напоминания неактивным: последняя активность старше N минут — одно сообщение до следующего захода
+REENGAGEMENT_ENABLED = os.getenv("REENGAGEMENT_ENABLED", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+# Для проверки: 5. Для боя: 360 (6 ч) — задай REENGAGEMENT_IDLE_MINUTES в env или поменяй дефолт
+REENGAGEMENT_IDLE_MINUTES = int(os.getenv("REENGAGEMENT_IDLE_MINUTES", "5"))
+# как часто проверять БД (секунды); для проверки 60, для боя можно 900
+REENGAGEMENT_POLL_SEC = int(os.getenv("REENGAGEMENT_POLL_SEC", "60"))
+
 # Обязательная подписка (t.me/bigsomani)
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bigsomani")
 
