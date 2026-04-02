@@ -4,11 +4,30 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from database import get_or_create_user
+from database import get_or_create_user, register_referral_invite
 from keyboards import main_menu_keyboard, BTN_MAIN_MENU
 from subscription import is_subscribed, subscribe_keyboard, MSG_SUBSCRIBE
 
 router = Router(name="start")
+
+
+def _parse_start_referrer_id(text: str | None) -> int | None:
+    """Диплинк t.me/bot?start=ref_USER_ID → /start ref_USER_ID."""
+    if not text:
+        return None
+    t = text.strip()
+    if not t.startswith("/start"):
+        return None
+    parts = t.split(maxsplit=1)
+    if len(parts) < 2:
+        return None
+    payload = parts[1].strip().split()[0]
+    if not payload.startswith("ref_"):
+        return None
+    try:
+        return int(payload[4:])
+    except ValueError:
+        return None
 
 
 async def _send_main_menu(bot: Bot, chat_id: int, is_new: bool, name: str) -> None:
@@ -34,6 +53,10 @@ async def cmd_start(message: Message, bot: Bot) -> None:
     user = message.from_user
     if not user:
         return
+
+    ref_by = _parse_start_referrer_id(message.text)
+    if ref_by is not None:
+        await register_referral_invite(user.id, ref_by)
 
     if not await is_subscribed(bot, user.id):
         await message.answer(MSG_SUBSCRIBE, reply_markup=subscribe_keyboard())

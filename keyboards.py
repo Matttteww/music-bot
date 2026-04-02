@@ -31,6 +31,7 @@ BTN_REPORT_CANCEL = "◀️ Отмена"
 # Стрим-очередь
 BTN_STREAM_ADD = "🎙 Закинуть трек на стрим"
 BTN_STREAM_EVALS = "📺 Оценки с стримов"
+BTN_REFERRAL = "🎁 Реферальная программа"
 
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
@@ -45,6 +46,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         KeyboardButton(text=BTN_RATINGS),
     )
     builder.row(KeyboardButton(text=BTN_KING))
+    builder.row(KeyboardButton(text=BTN_REFERRAL))
     return builder.as_markup(resize_keyboard=True)
 
 

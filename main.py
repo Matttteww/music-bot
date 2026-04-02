@@ -10,12 +10,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, REENGAGEMENT_ENABLED, YOO_KASSA_ENABLED
 from database import init_db, get_all_pending_payments, add_purchase, remove_pending_payment
-from handlers import start, profile, upload, vote, ratings, king, admin, stream
+from handlers import start, profile, upload, vote, ratings, king, admin, stream, referral
 # from handlers import payments  # ВРЕМЕННО ОТКЛЮЧЕНО: раскомментировать когда подключишь ЮKassa
 from activity_middleware import ActivityMiddleware
 from subscription import SubscriptionMiddleware
 from ban_middleware import BanMiddleware
 from reengagement import reengagement_loop
+from referral_reward_middleware import ReferralRewardMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,6 +77,9 @@ async def main() -> None:
     dp.update.outer_middleware(BanMiddleware(bot))
     dp.update.outer_middleware(SubscriptionMiddleware(bot))
 
+    dp.message.middleware(ReferralRewardMiddleware())
+    dp.callback_query.middleware(ReferralRewardMiddleware())
+
     dp.include_router(start.router)
     dp.include_router(profile.router)
     dp.include_router(upload.router)
@@ -84,6 +88,7 @@ async def main() -> None:
     dp.include_router(king.router)
     dp.include_router(admin.router)
     dp.include_router(stream.router)
+    dp.include_router(referral.router)
     # dp.include_router(payments.router)  # ВРЕМЕННО ОТКЛЮЧЕНО
 
     if YOO_KASSA_ENABLED:

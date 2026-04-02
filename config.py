@@ -3,6 +3,8 @@ import os
 import re
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+# Username бота для ссылок t.me/{BOT_USERNAME}?start=ref_... (в Telegram: @Tracklii_Bot, название «Tracklii»)
+BOT_USERNAME = (os.getenv("BOT_USERNAME", "Tracklii_Bot") or "").lstrip("@").strip()
 MAX_AUDIO_SIZE_MB = 20
 
 # ЮKassa (оплата). Добавь YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в переменные окружения Bothost
@@ -33,14 +35,14 @@ else:
 # Куда отправлять жалобы (chat_id админа @bigsomanii)
 REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "942340947")
 
-# Напоминания неактивным: последняя активность старше N минут — одно сообщение до следующего захода
+# Напоминания неактивным: простой от N минут и дольше (>=), не «ровно в момент N»
 REENGAGEMENT_ENABLED = os.getenv("REENGAGEMENT_ENABLED", "1").strip().lower() not in (
     "0",
     "false",
     "no",
     "off",
 )
-# 360 = 6 часов без активности. Для быстрого теста: REENGAGEMENT_IDLE_MINUTES=5 в env
+# 360 = минимум 6 ч без активности (6 ч, 12 ч, сутки — всё ок); тест: REENGAGEMENT_IDLE_MINUTES=5
 REENGAGEMENT_IDLE_MINUTES = int(os.getenv("REENGAGEMENT_IDLE_MINUTES", "360"))
 # как часто проверять БД (секунды); 900 = раз в 15 минут
 REENGAGEMENT_POLL_SEC = int(os.getenv("REENGAGEMENT_POLL_SEC", "900"))

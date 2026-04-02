@@ -116,6 +116,24 @@ async def _migrate_db() -> None:
                 "ALTER TABLE users ADD COLUMN last_reengagement_sent_at TEXT"
             )
             await db.commit()
+        if "referral_coins" not in user_cols:
+            await db.execute(
+                "ALTER TABLE users ADD COLUMN referral_coins INTEGER NOT NULL DEFAULT 0"
+            )
+            await db.commit()
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS referrals (
+                referred_id INTEGER PRIMARY KEY,
+                referrer_id INTEGER NOT NULL,
+                bonus_paid INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_id)"
+        )
+        await db.commit()
 
         # Таблица забаненных пользователей
         await db.execute("""
@@ -207,8 +225,10 @@ async def _migrate_db() -> None:
 
 async def fetch_users_for_reengagement(idle_minutes: int) -> list[int]:
     """
-    Пользователи без активности не менее idle_minutes минут, ещё без напоминания
-    за текущий период неактивности (после нового захода можно снова один раз).
+    Пользователи с простоем >= idle_minutes минут (от порога и дольше, не «ровно N минут»),
+    ещё без напоминания за текущий период неактивности (после нового захода — снова один раз).
+
+    Условие в SQL: (now - last_activity_at) в минутах >= idle_minutes.
 
     Сравнение через julianday — стабильнее, чем datetime('now', ?) с модификатором.
     """
@@ -244,6 +264,140 @@ async def mark_reengagement_sent(user_id: int) -> None:
             (user_id,),
         )
         await db.commit()
+
+
+async def register_referral_invite(referred_id: int, referrer_id: int) -> bool:
+    """
+    Запомнить приглашение по ссылке (первый реферер для referred_id сохраняется).
+    Возвращает True, если запись создана.
+    """
+    if referred_id == referrer_id:
+        return False
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM users WHERE user_id = ?", (referrer_id,)
+        )
+        if not await cursor.fetchone():
+            return False
+        cursor = await db.execute(
+            "SELECT 1 FROM referrals WHERE referred_id = ?", (referred_id,)
+        )
+        if await cursor.fetchone():
+            return False
+        await db.execute(
+            """
+            INSERT INTO referrals (referred_id, referrer_id, bonus_paid)
+            VALUES (?, ?, 0)
+            """,
+            (referred_id, referrer_id),
+        )
+        await db.commit()
+    return True
+
+
+async def get_pending_referral(referred_id: int) -> int | None:
+    """referrer_id, если бонус ещё не выдан; иначе None."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT referrer_id FROM referrals
+            WHERE referred_id = ? AND bonus_paid = 0
+            """,
+            (referred_id,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else None
+
+
+async def pay_referral_bonus(referred_id: int, bonus: int = 10) -> tuple[bool, int | None]:
+    """
+    Выдать бонус рефереру за referred_id (один раз).
+    Возвращает (успех, referrer_id для уведомления).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT referrer_id, bonus_paid FROM referrals WHERE referred_id = ?",
+            (referred_id,),
+        )
+        row = await cursor.fetchone()
+        if not row or row[1]:
+            return False, None
+        referrer_id = int(row[0])
+        await db.execute(
+            "UPDATE referrals SET bonus_paid = 1 WHERE referred_id = ? AND bonus_paid = 0",
+            (referred_id,),
+        )
+        cur_ch = await db.execute("SELECT changes()")
+        n = (await cur_ch.fetchone())[0]
+        if not n:
+            return False, None
+        await db.execute(
+            """
+            UPDATE users SET referral_coins = COALESCE(referral_coins, 0) + ?
+            WHERE user_id = ?
+            """,
+            (bonus, referrer_id),
+        )
+        await db.commit()
+    return True, referrer_id
+
+
+async def get_referral_coins(user_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(referral_coins, 0) FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+
+async def list_referrals_for_referrer(referrer_id: int) -> list[dict]:
+    """Приглашённые, за которых уже начислен бонус (подписались и нажали кнопку)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT r.referred_id, u.username, u.full_name, u.display_name
+            FROM referrals r
+            LEFT JOIN users u ON u.user_id = r.referred_id
+            WHERE r.referrer_id = ? AND r.bonus_paid = 1
+            ORDER BY r.created_at DESC
+            """,
+            (referrer_id,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "referred_id": r[0],
+                "username": r[1],
+                "full_name": r[2],
+                "display_name": r[3],
+            }
+            for r in rows
+        ]
+
+
+async def get_user_display_label(user_id: int) -> str:
+    """Короткое имя для уведомлений."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT username, full_name, display_name
+            FROM users WHERE user_id = ?
+            """,
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+    if not row:
+        return str(user_id)
+    uname, fname, dname = row[0] or "", row[1] or "", row[2] or ""
+    if dname.strip():
+        return dname.strip()
+    if fname.strip():
+        return fname.strip()
+    if uname.strip():
+        return f"@{uname}" if not uname.startswith("@") else uname
+    return str(user_id)
 
 
 async def get_or_create_user(user_id: int, username: str, full_name: str) -> bool:
