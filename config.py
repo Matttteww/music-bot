@@ -40,10 +40,10 @@ REENGAGEMENT_ENABLED = os.getenv("REENGAGEMENT_ENABLED", "1").strip().lower() no
     "no",
     "off",
 )
-# Для проверки: 5. Для боя: 360 (6 ч) — задай REENGAGEMENT_IDLE_MINUTES в env или поменяй дефолт
-REENGAGEMENT_IDLE_MINUTES = int(os.getenv("REENGAGEMENT_IDLE_MINUTES", "5"))
-# как часто проверять БД (секунды); для проверки 60, для боя можно 900
-REENGAGEMENT_POLL_SEC = int(os.getenv("REENGAGEMENT_POLL_SEC", "60"))
+# 360 = 6 часов без активности. Для быстрого теста: REENGAGEMENT_IDLE_MINUTES=5 в env
+REENGAGEMENT_IDLE_MINUTES = int(os.getenv("REENGAGEMENT_IDLE_MINUTES", "360"))
+# как часто проверять БД (секунды); 900 = раз в 15 минут
+REENGAGEMENT_POLL_SEC = int(os.getenv("REENGAGEMENT_POLL_SEC", "900"))
 
 # Обязательная подписка (t.me/bigsomani)
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bigsomani")
