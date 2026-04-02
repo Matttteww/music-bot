@@ -103,7 +103,12 @@ async def cmd_stats(message: Message) -> None:
         f"🎵 Всего загруженных треков: <b>{s['tracks_total']}</b>\n"
         f"🧮 Оценённых треков: <b>{s['rated_tracks_count']}</b>\n"
         f"📝 Всего оценок треков: <b>{s['total_track_ratings']}</b>\n"
-        f"⭐ Оценивали хотя бы один трек: <b>{s['raters_count']}</b>",
+        f"⭐ Оценивали хотя бы один трек: <b>{s['raters_count']}</b>\n\n"
+        "🎁 <b>Реферальная программа</b>\n"
+        f"✅ Пришли по чужой ссылке и довели до бонуса: <b>{s['referrals_bonus_paid']}</b> чел.\n"
+        f"⏳ Ссылка записана, бонус ещё не выдан: <b>{s['referrals_bonus_pending']}</b>\n"
+        f"👤 Рефереров, получивших монеты хотя бы раз: <b>{s['referrals_distinct_referrers']}</b>\n"
+        f"💰 Всего выдано монет за рефералов: <b>{s['referrals_coins_issued']}</b>",
     )
 
 

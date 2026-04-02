@@ -450,6 +450,10 @@ async def get_admin_live_stats() -> dict[str, int]:
     - rated_tracks_count: сколько треков получили хотя бы одну оценку
     - total_track_ratings: сколько всего оценок (в таблице ratings) у активных треков
     - raters_count: уникальные пользователи, поставившие хотя бы одну оценку
+    - referrals_bonus_paid: приглашённые по ссылке, за которых уже начислили 10 монет рефереру
+    - referrals_bonus_pending: приглашённые, ссылка есть, бонус ещё не выдан
+    - referrals_distinct_referrers: сколько разных людей получили хотя бы один такой бонус
+    - referrals_coins_issued: всего монет выдано за рефералов (10 × paid)
     """
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
@@ -499,6 +503,23 @@ async def get_admin_live_stats() -> dict[str, int]:
         )
         total_track_ratings = (await cursor.fetchone())[0] or 0
 
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM referrals WHERE bonus_paid = 1",
+        )
+        ref_paid = (await cursor.fetchone())[0] or 0
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM referrals WHERE bonus_paid = 0",
+        )
+        ref_pending = (await cursor.fetchone())[0] or 0
+
+        cursor = await db.execute(
+            "SELECT COUNT(DISTINCT referrer_id) FROM referrals WHERE bonus_paid = 1",
+        )
+        ref_distinct = (await cursor.fetchone())[0] or 0
+
+    ref_coins_issued = ref_paid * 10
+
     return {
         "active_last_minute": active,
         "active_last_24h": active_24h,
@@ -508,6 +529,10 @@ async def get_admin_live_stats() -> dict[str, int]:
         "rated_tracks_count": rated_tracks_count,
         "total_track_ratings": total_track_ratings,
         "raters_count": raters,
+        "referrals_bonus_paid": ref_paid,
+        "referrals_bonus_pending": ref_pending,
+        "referrals_distinct_referrers": ref_distinct,
+        "referrals_coins_issued": ref_coins_issued,
     }
 
 
