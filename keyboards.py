@@ -8,7 +8,7 @@ BTN_VOTE = "🎵 Голосовать"
 BTN_UPLOAD = "📤 Загрузить трек"
 BTN_PROFILE = "👤 Профиль"
 BTN_RATINGS = "🏆 Рейтинги"
-BTN_KING = "👑 Царь SoundCloud'а"
+BTN_KING = "👑 Царь SC"
 BTN_TOP_TRACKS = "🎵 ТОП треков"
 BTN_TOP_ARTISTS = "👤 ТОП исполнителей"
 BTN_FAVORITES = "❤️ Избранные треки"
@@ -31,11 +31,11 @@ BTN_REPORT_CANCEL = "◀️ Отмена"
 # Стрим-очередь
 BTN_STREAM_ADD = "🎙 Закинуть трек на стрим"
 BTN_STREAM_EVALS = "📺 Оценки с стримов"
-BTN_REFERRAL = "🎁 Реферальная программа"
+BTN_REFERRAL = "🎁 Рефералы"
 
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Главное меню."""
+    """Главное меню: сетка 2×3, кнопки одной ширины."""
     builder = ReplyKeyboardBuilder()
     builder.row(
         KeyboardButton(text=BTN_VOTE),
@@ -45,8 +45,10 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         KeyboardButton(text=BTN_PROFILE),
         KeyboardButton(text=BTN_RATINGS),
     )
-    builder.row(KeyboardButton(text=BTN_KING))
-    builder.row(KeyboardButton(text=BTN_REFERRAL))
+    builder.row(
+        KeyboardButton(text=BTN_KING),
+        KeyboardButton(text=BTN_REFERRAL),
+    )
     return builder.as_markup(resize_keyboard=True)
 
 

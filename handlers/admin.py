@@ -14,7 +14,13 @@ from database import (
     get_user_id_by_username,
     unban_user,
 )
-from keyboards import main_menu_keyboard, BTN_STREAM_ADD, BTN_STREAM_EVALS, BTN_KING
+from keyboards import (
+    main_menu_keyboard,
+    BTN_STREAM_ADD,
+    BTN_STREAM_EVALS,
+    BTN_KING,
+    BTN_REFERRAL,
+)
 
 router = Router(name="admin")
 
@@ -103,7 +109,7 @@ async def cmd_stats(message: Message) -> None:
 
 @router.message(
     StateFilter(None),
-    ~F.text.in_({BTN_STREAM_ADD, BTN_STREAM_EVALS, BTN_KING}),
+    ~F.text.in_({BTN_STREAM_ADD, BTN_STREAM_EVALS, BTN_KING, BTN_REFERRAL}),
     ~F.text.regexp(r"^/(streamon|streamoff|streanno)(@.+)?$"),
 )
 async def fallback_unknown_message(message: Message, state: FSMContext) -> None:

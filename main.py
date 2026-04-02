@@ -86,9 +86,9 @@ async def main() -> None:
     dp.include_router(vote.router)
     dp.include_router(ratings.router)
     dp.include_router(king.router)
+    dp.include_router(referral.router)
     dp.include_router(admin.router)
     dp.include_router(stream.router)
-    dp.include_router(referral.router)
     # dp.include_router(payments.router)  # ВРЕМЕННО ОТКЛЮЧЕНО
 
     if YOO_KASSA_ENABLED:
