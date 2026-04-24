@@ -21,6 +21,9 @@ from keyboards import (
     BTN_RATINGS,
     BTN_TOP_TRACKS,
     BTN_TOP_ARTISTS,
+    BTN_TRACKS_DAY,
+    BTN_TRACKS_RISING,
+    BTN_TRACKS_WORST,
     BTN_FAVORITES,
     BTN_BACK,
 )
@@ -167,6 +170,48 @@ async def show_top_artists(message: Message, state: FSMContext) -> None:
         kb = builder.as_markup()
     await state.set_state(RatingsState.viewing)
     await message.answer(text, reply_markup=kb)
+
+
+@router.message(F.text.in_({BTN_TRACKS_DAY, BTN_TRACKS_RISING, BTN_TRACKS_WORST}))
+async def show_extra_tracks_categories(message: Message, state: FSMContext) -> None:
+    tracks = await get_top_tracks(limit=10)
+    await state.set_state(RatingsState.viewing)
+    if not tracks:
+        await message.answer(
+            "Пока нет данных для этой категории.",
+            reply_markup=back_to_ratings_keyboard(),
+        )
+        return
+
+    if message.text == BTN_TRACKS_DAY:
+        track = tracks[0]
+        await message.answer(
+            f"🔥 <b>Трек дня</b>\n"
+            f"{html.quote(track.get('title') or '?')} · @{html.quote(track.get('username') or 'unknown')}\n"
+            f"⭐️ {round(float(track.get('avg_score') or 0), 1)}/10",
+            reply_markup=back_to_ratings_keyboard(),
+        )
+        return
+
+    if message.text == BTN_TRACKS_RISING:
+        rising = sorted(tracks, key=lambda t: int(t.get("rating_count") or 0), reverse=True)[:5]
+        lines = ["📈 <b>Растущие</b>", ""]
+        for i, t in enumerate(rising, 1):
+            lines.append(
+                f"{i}. {html.quote(t.get('title') or '?')} "
+                f"— {int(t.get('rating_count') or 0)} оценок"
+            )
+        await message.answer("\n".join(lines), reply_markup=back_to_ratings_keyboard())
+        return
+
+    worst = sorted(tracks, key=lambda t: float(t.get("avg_score") or 0))[:5]
+    lines = ["💀 <b>Худшие</b>", ""]
+    for i, t in enumerate(worst, 1):
+        lines.append(
+            f"{i}. {html.quote(t.get('title') or '?')} "
+            f"— ⭐️ {round(float(t.get('avg_score') or 0), 1)}/10"
+        )
+    await message.answer("\n".join(lines), reply_markup=back_to_ratings_keyboard())
 
 
 @router.message(RatingsState.menu, F.text == BTN_FAVORITES)

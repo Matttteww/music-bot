@@ -352,6 +352,22 @@ async def get_referral_coins(user_id: int) -> int:
         return int(row[0]) if row else 0
 
 
+async def add_user_coins(user_id: int, amount: int) -> None:
+    """Начислить пользователю монеты."""
+    if amount <= 0:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE users
+            SET referral_coins = COALESCE(referral_coins, 0) + ?
+            WHERE user_id = ?
+            """,
+            (amount, user_id),
+        )
+        await db.commit()
+
+
 async def list_referrals_for_referrer(referrer_id: int) -> list[dict]:
     """Приглашённые, за которых уже начислен бонус (подписались и нажали кнопку)."""
     async with aiosqlite.connect(DB_PATH) as db:

@@ -19,8 +19,13 @@ from database import (
 )
 from keyboards import (
     rating_keyboard,
+    listener_post_rating_keyboard,
     main_menu_keyboard,
     BTN_VOTE,
+    BTN_LISTENER_START,
+    BTN_LISTENER_NEXT,
+    BTN_LISTENER_TOURNAMENT,
+    BTN_LISTENER_FAV_AFTER_RATE,
     BTN_STOP_VOTE,
     BTN_REPORT,
     BTN_FAVORITE_ADD,
@@ -32,6 +37,7 @@ from keyboards import (
     BTN_REPORT_CANCEL,
     report_reason_keyboard,
     report_cancel_keyboard,
+    BTN_KING,
 )
 
 router = Router(name="vote")
@@ -142,7 +148,7 @@ async def _send_track(
         )
 
 
-@router.message(F.text == BTN_VOTE)
+@router.message(F.text.in_({BTN_VOTE, BTN_LISTENER_START}))
 async def send_track_for_voting(message: Message, state: FSMContext, bot: Bot) -> None:
     """Отправить случайный трек для голосования."""
     user = message.from_user
@@ -168,6 +174,57 @@ async def send_track_for_voting(message: Message, state: FSMContext, bot: Bot) -
     await state.set_state(VotingState.active)
     await state.update_data(track_id=track["track_id"])
     await _send_track(message, bot, track, message.chat.id, user.id)
+
+
+@router.message(VotingState.active, F.text == BTN_LISTENER_NEXT)
+async def next_track_after_rating(message: Message, state: FSMContext, bot: Bot) -> None:
+    """Следующий трек после экрана с наградой."""
+    user = message.from_user
+    if not user:
+        return
+    data = await state.get_data()
+    track_id = data.get("next_track_id")
+    track = await get_track(track_id) if track_id else None
+    if not track:
+        track = await get_random_track_for_voting(user.id)
+    if not track:
+        await state.clear()
+        await message.answer(
+            "😔 Пока нет новых треков. Зайди чуть позже.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+    await state.update_data(track_id=track["track_id"], next_track_id=None)
+    await _send_track(message, bot, track, message.chat.id, user.id)
+
+
+@router.message(VotingState.active, F.text == BTN_LISTENER_FAV_AFTER_RATE)
+async def add_last_rated_to_favorites(message: Message, state: FSMContext) -> None:
+    """Добавить последний оцененный трек в избранное."""
+    user = message.from_user
+    if not user:
+        return
+    data = await state.get_data()
+    rated_track_id = data.get("last_rated_track_id")
+    if not rated_track_id:
+        await message.answer("Сначала оцени трек, чтобы добавить его в избранное.")
+        return
+    ok, now_in_fav = await toggle_favorite(user.id, rated_track_id)
+    if not ok:
+        return
+    await message.answer(
+        "⭐ Трек добавлен в избранное." if now_in_fav else "⭐ Трек уже был в избранном.",
+        reply_markup=listener_post_rating_keyboard(),
+    )
+
+
+@router.message(VotingState.active, F.text == BTN_LISTENER_TOURNAMENT)
+async def king_hint_after_rating(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        f"Жми «{BTN_KING}», чтобы начать турнир 1v1.",
+        reply_markup=main_menu_keyboard(),
+    )
 
 
 @router.message(VotingState.active, F.text.in_({BTN_FAVORITE_ADD, BTN_FAVORITE_REMOVE}))
@@ -459,12 +516,13 @@ async def process_rating(message: Message, state: FSMContext, bot: Bot) -> None:
             pass
 
     track = await get_random_track_for_voting(user.id)
-    if track:
-        await state.update_data(track_id=track["track_id"])
-        await _send_track(message, bot, track, message.chat.id, user.id)
-    else:
-        await state.clear()
-        await message.answer(
-            "✅ Спасибо за оценку!\n\n😔 Пока нет других треков для оценки.\nЗагрузи свой трек или заходи позже!",
-            reply_markup=main_menu_keyboard(),
-        )
+    await state.update_data(
+        last_rated_track_id=track_id,
+        next_track_id=(track["track_id"] if track else None),
+    )
+    await message.answer(
+        f"✅ Оценка принята: {score}/10\n\n"
+        "💰 +1 монета\n\n"
+        "Хочешь ещё?",
+        reply_markup=listener_post_rating_keyboard(),
+    )

@@ -10,7 +10,13 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database import add_king_win, get_king_tournament_tracks, get_track, get_user_display_info
+from database import (
+    add_king_win,
+    add_user_coins,
+    get_king_tournament_tracks,
+    get_track,
+    get_user_display_info,
+)
 from keyboards import BTN_KING, main_menu_keyboard
 
 router = Router(name="king")
@@ -68,6 +74,7 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
 
                 winner_user_id = int(winner_track["user_id"])
                 await add_king_win(winner_user_id)
+                await add_user_coins(winner_user_id, 50)
                 chooser_id = int(data.get("chooser_user_id") or chat_id)
                 chooser_name = data.get("chooser_name") or str(chooser_id)
 
@@ -87,7 +94,8 @@ async def _next_match_or_finish(state: FSMContext, bot: Bot, chat_id: int) -> bo
                         "🏆 Твой трек победил в «Царь SoundCloud'а»!\n\n"
                         f"Трек: <b>{html.quote(winner_track.get('title') or '?')}</b>\n"
                         f"Выбрал победителем: {html.quote(str(chooser_name))}\n\n"
-                        "Тебе засчитана +1 победа в профиле.",
+                        "Тебе засчитана +1 победа в профиле.\n"
+                        "🔥 Награда: +50 монет и буст в рейтинге.",
                     )
                 except Exception:
                     pass
@@ -162,7 +170,10 @@ async def start_king(message: Message, state: FSMContext, bot: Bot) -> None:
     )
     await message.answer(
         "👑 <b>Царь SoundCloud'а</b>\n"
-        "Турнир начался! Выбирай лучший трек в каждой паре.",
+        "Турнир начался! Выбирай лучший трек в каждой паре.\n\n"
+        "🔥 Победитель получает:\n"
+        "+50 монет\n"
+        "+буст в рейтинге",
     )
     await _next_match_or_finish(state, bot, message.chat.id)
 

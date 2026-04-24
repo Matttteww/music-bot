@@ -5,7 +5,23 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from database import get_or_create_user, register_referral_invite
-from keyboards import main_menu_keyboard, BTN_MAIN_MENU
+from keyboards import (
+    main_menu_keyboard,
+    role_menu_keyboard,
+    listener_intro_keyboard,
+    artist_intro_keyboard,
+    streamer_intro_keyboard,
+    BTN_MAIN_MENU,
+    BTN_ROLE_LISTENER,
+    BTN_ROLE_ARTIST,
+    BTN_ROLE_STREAMER,
+    BTN_ARTIST_MY_TRACKS,
+    BTN_ARTIST_PROMOTE,
+    BTN_STREAM_FREE,
+    BTN_STREAM_PREMIUM,
+    BTN_STREAM_PRO,
+    BTN_STREAM_START_SESSION,
+)
 from subscription import is_subscribed, subscribe_keyboard, MSG_SUBSCRIBE
 
 router = Router(name="start")
@@ -32,19 +48,16 @@ def _parse_start_referrer_id(text: str | None) -> int | None:
 
 async def _send_main_menu(bot: Bot, chat_id: int, is_new: bool, name: str) -> None:
     """Отправляет приветствие и главное меню."""
-    if is_new:
-        text = (
-            f"👋 Привет, {name}!\n\n"
-            "Добро пожаловать в бота оценки музыкальных треков.\n\n"
-            "Здесь ты можешь:\n"
-            "• Загружать свои треки и получать оценки\n"
-            "• Голосовать за треки других исполнителей\n"
-            "• Смотреть рейтинги лучших треков и исполнителей\n\n"
-            "Выбери действие:"
-        )
-    else:
-        text = f"С возвращением, {name}! Чем займёмся?"
-    await bot.send_message(chat_id, text, reply_markup=main_menu_keyboard())
+    _ = is_new
+    text = (
+        f"👋 Добро пожаловать в Trackli, {name}!\n\n"
+        "Здесь ты можешь:\n"
+        "🎧 Оценивать треки и зарабатывать монеты\n"
+        "🎤 Продвигать свою музыку\n"
+        "📡 Попадать на стримы и получать аудиторию\n\n"
+        "👇 Выбери, как ты хочешь использовать бота:"
+    )
+    await bot.send_message(chat_id, text, reply_markup=role_menu_keyboard())
 
 
 @router.message(CommandStart())
@@ -111,4 +124,91 @@ async def cmd_myid(message: Message) -> None:
 async def back_to_main(message: Message, state: FSMContext) -> None:
     """Возврат в главное меню."""
     await state.clear()
-    await message.answer("Выбери действие:", reply_markup=main_menu_keyboard())
+    await message.answer(
+        "Главное меню:\n"
+        "• 🎵 Голосовать\n"
+        "• 📤 Загрузить трек\n"
+        "• 👤 Профиль\n"
+        "• 🏆 Рейтинги\n"
+        "• 👑 Царь SC\n"
+        "• 🎁 Рефералы",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(F.text == BTN_ROLE_LISTENER)
+async def start_listener_flow(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "🎧 <b>Оценивай треки и получай монеты</b>\n\n"
+        "— Слушай музыку\n"
+        "— Ставь оценки\n"
+        "— Участвуй в турнирах\n\n"
+        "Нажми «Начать», чтобы получить первый трек.",
+        reply_markup=listener_intro_keyboard(),
+    )
+
+
+@router.message(F.text == BTN_ROLE_ARTIST)
+async def start_artist_flow(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "🎤 <b>Продвигай свою музыку</b>\n\n"
+        "— Получай оценки\n"
+        "— Попадай на стримы\n"
+        "— Расти в рейтингах\n\n"
+        "👇 Выбери следующий шаг:",
+        reply_markup=artist_intro_keyboard(),
+    )
+
+
+@router.message(F.text == BTN_ROLE_STREAMER)
+async def start_streamer_flow(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "📡 <b>Подключи бот к своему стриму</b>\n\n"
+        "Ты получаешь:\n"
+        "— поток треков\n"
+        "— зрителей\n"
+        "— доход\n\n"
+        "👇 Выбери тариф:",
+        reply_markup=streamer_intro_keyboard(),
+    )
+
+
+@router.message(F.text.in_({BTN_STREAM_FREE, BTN_STREAM_PREMIUM, BTN_STREAM_PRO}))
+async def streamer_tariff_info(message: Message) -> None:
+    await message.answer(
+        "🎧 <b>Как это работает:</b>\n\n"
+        "1. Треки приходят автоматически\n"
+        "2. Ты слушаешь их на стриме\n"
+        "3. Зрители оценивают\n"
+        "4. Ты получаешь деньги/трафик\n\n"
+        "Жми «▶️ Начать стрим-сессию», чтобы перейти к отправке треков в стрим-очередь.",
+        reply_markup=streamer_intro_keyboard(),
+    )
+
+
+@router.message(F.text == BTN_STREAM_START_SESSION)
+async def streamer_start_session(message: Message) -> None:
+    await message.answer(
+        "Запускаем стрим-сценарий. Нажми «🎙 Закинуть трек на стрим» в меню профиля.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(F.text == BTN_ARTIST_MY_TRACKS)
+async def artist_my_tracks_hint(message: Message) -> None:
+    await message.answer(
+        "Открой «👤 Профиль» — там статистика и список твоих треков.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(F.text == BTN_ARTIST_PROMOTE)
+async def artist_promote_hint(message: Message) -> None:
+    await message.answer(
+        "🚀 Продвижение ускоряет попадание в прослушивания и на стримы.\n"
+        "Пока доступна базовая очередь: загрузи трек и следи за статистикой в профиле.",
+        reply_markup=main_menu_keyboard(),
+    )

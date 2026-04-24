@@ -3,7 +3,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import MAX_AUDIO_SIZE_BYTES, is_soundcloud_url, PAYMENTS_DISABLED, UNLIMITED_MODE
@@ -19,6 +19,18 @@ from database import (
 from keyboards import main_menu_keyboard, cancel_keyboard, BTN_UPLOAD, BTN_CANCEL
 
 router = Router(name="upload")
+
+
+def _after_upload_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🟢 В бесплатную очередь")],
+            [KeyboardButton(text="🚀 Продвинуть трек (быстрее + стримы)")],
+            [KeyboardButton(text="📊 Смотреть статистику")],
+            [KeyboardButton(text="◀️ Главное меню")],
+        ],
+        resize_keyboard=True,
+    )
 
 
 class UploadTrack(StatesGroup):
@@ -65,7 +77,10 @@ async def start_upload(message: Message, state: FSMContext) -> None:
     await message.answer(
         "📤 Отправь аудиофайл (mp3, m4a, ogg) до 20 МБ\n"
         "или вставь ссылку на SoundCloud.\n\n"
-        "После этого нужно будет указать название трека.",
+        "После этого нужно будет указать название трека.\n\n"
+        "⚠️ Важно:\n"
+        "Бесплатная очередь — медленнее.\n"
+        "Продвижение — быстрее и с шансом попасть на стримы.",
         reply_markup=cancel_keyboard(),
     )
 
@@ -226,9 +241,9 @@ async def receive_title(message: Message, state: FSMContext) -> None:
     )
     await update_after_upload(user.id)
     await message.answer(
-        f"✅ Трек «{title}» успешно загружен!\n\n"
-        "Он добавлен в пул для голосования. Другие пользователи смогут его оценить.",
-        reply_markup=main_menu_keyboard(),
+        f"✅ Трек «{title}» загружен!\n\n"
+        "Что дальше?",
+        reply_markup=_after_upload_keyboard(),
     )
 
 
@@ -306,6 +321,31 @@ async def replace_confirm_ignore(message: Message) -> None:
 @router.message(UploadTrack.waiting_title)
 async def invalid_title(message: Message) -> None:
     await message.answer("Отправь текстом название трека. Для отмены нажми «❌ Отмена»")
+
+
+@router.message(F.text == "🟢 В бесплатную очередь")
+async def upload_free_queue_info(message: Message) -> None:
+    await message.answer(
+        "Трек оставлен в бесплатной очереди. Он уже участвует в обычных оценках.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(F.text == "🚀 Продвинуть трек (быстрее + стримы)")
+async def upload_promote_info(message: Message) -> None:
+    await message.answer(
+        "🚀 Продвижение скоро будет доступно.\n"
+        "Пока трек участвует в бесплатной очереди, а также может попасть на стрим через раздел стрима.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(F.text == "📊 Смотреть статистику")
+async def upload_stats_info(message: Message) -> None:
+    await message.answer(
+        "Открой «👤 Профиль», чтобы увидеть рейтинг и статистику по трекам.",
+        reply_markup=main_menu_keyboard(),
+    )
 
 
 @router.message(Command("cancel"))

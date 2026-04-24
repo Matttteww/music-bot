@@ -23,6 +23,8 @@ from database import (
     get_free_replacements_left,
     delete_track_by_user,
     get_artist_rank,
+    get_referral_coins,
+    get_user_favorites,
 )
 from handlers.upload import _get_audio_file_id_and_size
 from utils import pluralize_likes
@@ -97,6 +99,8 @@ def _format_profile_text(
     page: int,
     artist_rank: int | None,
     artists_in_ranking: int,
+    coins: int,
+    favorites_count: int,
 ) -> str:
     """Текст профиля: блок статистики + срез треков для страницы page."""
     name = html.quote(disp["display_name"] or disp["username"] or "Пользователь")
@@ -118,13 +122,18 @@ def _format_profile_text(
 
     lines = [
         f"👤 <b>Профиль</b>",
-        f"Исполнитель: {name}",
-        f"Смен ника осталось: {disp['changes_left']}/3",
-        f"Треков: {tracks_count} | Замен доступно: {repl_text}",
+        f"🎤 Ник: {name}",
+        f"💰 Монеты: {coins}",
+        f"📊 Рейтинг: {stats['artist_avg']}",
         "",
-        f"📊 <b>Рейтинг исполнителя:</b> {stats['artist_avg']}/10",
+        f"🎵 Треки: {tracks_count}",
+        f"⭐ В избранном: {favorites_count}",
+        f"🏆 Побед: {int(stats.get('king_wins') or 0)}",
+        "",
+        f"Смен ника осталось: {disp['changes_left']}/3",
+        f"Замен доступно: {repl_text}",
+        "",
         f"📈 <b>Всего оценок:</b> {stats['total_ratings']}",
-        f"👑 <b>Побед в «Царь SoundCloud'а»:</b> {int(stats.get('king_wins') or 0)}",
         rank_line,
         "",
         f"🎵 <b>Мои треки ({len(tracks)}):</b> стр. {page + 1}/{total_pages}",
@@ -270,6 +279,8 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     tracks = await get_user_tracks(user.id)
     disp = await get_user_display_info(user.id)
     rank, artists_n = await get_artist_rank(user.id)
+    coins = await get_referral_coins(user.id)
+    favorites_count = len(await get_user_favorites(user.id))
 
     replacements_left = await get_free_replacements_left(user.id)
     tracks_count = await get_user_tracks_count(user.id)
@@ -278,6 +289,7 @@ async def show_profile(message: Message, state: FSMContext) -> None:
     text = _format_profile_text(
         disp, stats, tracks, tracks_count, repl_text, page=0,
         artist_rank=rank, artists_in_ranking=artists_n,
+        coins=coins, favorites_count=favorites_count,
     )
     total_pages = max(1, (len(tracks) + PROFILE_TRACKS_PER_PAGE - 1) // PROFILE_TRACKS_PER_PAGE)
     pk = profile_keyboard(disp["changes_left"], has_tracks=len(tracks) > 0)
@@ -731,10 +743,13 @@ async def profile_page_turn(callback: CallbackQuery) -> None:
     replacements_left = await get_free_replacements_left(user.id)
     repl_text = "∞" if UNLIMITED_MODE else str(replacements_left)
     rank, artists_n = await get_artist_rank(user.id)
+    coins = await get_referral_coins(user.id)
+    favorites_count = len(await get_user_favorites(user.id))
 
     text = _format_profile_text(
         disp, stats, tracks, tracks_count, repl_text, page=page,
         artist_rank=rank, artists_in_ranking=artists_n,
+        coins=coins, favorites_count=favorites_count,
     )
 
     if len(tracks) > PROFILE_TRACKS_PER_PAGE:
