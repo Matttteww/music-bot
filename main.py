@@ -4,6 +4,7 @@ import logging
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -24,6 +25,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+POLL_RESTART_DELAY_SEC = 5
 
 MESSAGES = {
     "TRACK_39": "✅ Оплата получена! +1 слот для загрузки трека.",
@@ -98,7 +100,25 @@ async def main() -> None:
         asyncio.create_task(reengagement_loop(bot))
 
     logger.info("Бот запущен")
-    await dp.start_polling(bot)
+    while True:
+        try:
+            await dp.start_polling(bot)
+            break
+        except TelegramNetworkError as e:
+            logger.warning(
+                "Сетевой сбой Telegram API: %s. Повтор через %s сек.",
+                e,
+                POLL_RESTART_DELAY_SEC,
+            )
+            await asyncio.sleep(POLL_RESTART_DELAY_SEC)
+        except Exception:
+            # Не даём процессу упасть насовсем на хостинге:
+            # логируем и пробуем переподключиться.
+            logger.exception(
+                "Критическая ошибка polling. Повтор через %s сек.",
+                POLL_RESTART_DELAY_SEC,
+            )
+            await asyncio.sleep(POLL_RESTART_DELAY_SEC)
 
 
 if __name__ == "__main__":
