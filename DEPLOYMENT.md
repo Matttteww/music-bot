@@ -16,9 +16,13 @@
 | **Локально** | Файл `music_ratings.db` в папке проекта — сохраняется при перезапуске |
 
 ### Путь к БД
-В `config.py`: `DB_PATH = "music_ratings.db"` — рядом с кодом.
+В проекте приоритет такой:
+1. `DB_PATH` из переменной окружения
+2. если есть `/data` — используется `/data/music_ratings.db`
+3. если Docker `/app` — `/tmp/music_ratings.db`
+4. иначе локально `music_ratings.db`
 
-Для Bothost с Volume укажи путь к смонтированному диску через переменную окружения:
+Для Bothost с Volume рекомендуется явно указать:
 ```
 DB_PATH=/data/music_ratings.db
 ```
@@ -46,14 +50,15 @@ python backup_db.py
 
 ### Уже обработано корректно
 - **Payment polling** — бесконечный цикл с `try/except`, при ошибке логирует и продолжает
-- **YooKassa** — вызовы в `run_in_executor`, ошибки обрабатываются
+- **YooKassa** — вызовы в `run_in_executor` + `asyncio.wait_for(..., timeout=15)` уже добавлены
 - **Подписка** — `get_chat_member` в try/except, при ошибке считаем «не подписан»
+- **Polling Telegram** — при `TelegramNetworkError` бот не падает, а переподключается с задержкой
 
 ### Потенциальные риски
 
 | Риск | Где | Рекомендация |
 |------|-----|--------------|
-| **Таймаут YooKassa** | `payments.py` — API без timeout | Добавить `asyncio.wait_for(..., timeout=15)` |
+| **Таймаут YooKassa** | `payments.py` | Уже покрыто timeout=15, при необходимости увеличить до 20-30 |
 | **Таймаут Telegram API** | `send_message`, `get_chat_member` | aiogram по умолчанию ~60 сек — обычно достаточно |
 | **Потеря FSM-состояния** | `MemoryStorage` | При перезапуске сбрасываются «загрузка трека», «голосование» — пользователь начинает заново. Это нормально. |
 | **Большие исключения** | Много `except Exception: pass` | Лучше логировать: `logger.exception(...)` |
@@ -84,5 +89,6 @@ pytest
 
 - [ ] Если нужна сохранность БД на Bothost — тариф Basic+ и Volume
 - [ ] Переменная `DB_PATH` на Volume: `/data/music_ratings.db`
+- [ ] Если сеть нестабильна: временно отключить напоминания `REENGAGEMENT_ENABLED=0`
 - [ ] Регулярные бэкапы `music_ratings.db`
 - [ ] Логи в Bothost смотреть при странном поведении

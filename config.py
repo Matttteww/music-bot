@@ -24,9 +24,15 @@ PRICE_PACK_5 = 159
 PRICE_REPLACEMENT = 29
 MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_MB * 1024 * 1024
 ALLOWED_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".ogg")
-# Путь к БД. DB_PATH из env — приоритет (Volume на Basic+). Иначе /tmp в Docker, иначе music_ratings.db
+# Путь к БД:
+# 1) DB_PATH из env — приоритет (рекомендуется для Bothost Volume: /data/music_ratings.db)
+# 2) Если есть смонтированный /data — используем его автоматически
+# 3) В Docker fallback: /tmp/music_ratings.db
+# 4) Локально fallback: ./music_ratings.db
 if os.getenv("DB_PATH"):
     DB_PATH = os.getenv("DB_PATH")
+elif os.path.exists("/data"):
+    DB_PATH = "/data/music_ratings.db"
 elif os.path.exists("/app"):
     DB_PATH = "/tmp/music_ratings.db"
 else:
