@@ -127,6 +127,8 @@ async def _migrate_db() -> None:
                 referred_id INTEGER PRIMARY KEY,
                 referrer_id INTEGER NOT NULL,
                 bonus_paid INTEGER NOT NULL DEFAULT 0,
+                activity_carry REAL NOT NULL DEFAULT 0,
+                activity_paid INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -134,6 +136,14 @@ async def _migrate_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_id)"
         )
         await db.commit()
+        cursor = await db.execute("PRAGMA table_info(referrals)")
+        ref_cols = [row[1] for row in await cursor.fetchall()]
+        if "activity_carry" not in ref_cols:
+            await db.execute("ALTER TABLE referrals ADD COLUMN activity_carry REAL NOT NULL DEFAULT 0")
+            await db.commit()
+        if "activity_paid" not in ref_cols:
+            await db.execute("ALTER TABLE referrals ADD COLUMN activity_paid INTEGER NOT NULL DEFAULT 0")
+            await db.commit()
 
         # Таблица забаненных пользователей
         await db.execute("""
@@ -208,6 +218,22 @@ async def _migrate_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.commit()
+
+        # Продвижение треков: приоритетная выдача в голосовании.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS track_promotions (
+                track_id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                impressions_left INTEGER NOT NULL DEFAULT 20,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (track_id) REFERENCES tracks(track_id),
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_track_promotions_user ON track_promotions(user_id)"
+        )
         await db.commit()
 
         # Ожидающие оплаты платежи (для проверки статуса)
@@ -366,6 +392,122 @@ async def add_user_coins(user_id: int, amount: int) -> None:
             (amount, user_id),
         )
         await db.commit()
+    await apply_referral_activity_bonus_for_user(user_id, amount)
+
+
+async def get_user_coins(user_id: int) -> int:
+    """Текущий баланс монет пользователя."""
+    return await get_referral_coins(user_id)
+
+
+async def apply_referral_activity_bonus_for_user(referred_id: int, activity_amount: int) -> tuple[int, int | None]:
+    """
+    Начисляет рефереру 5% от активности приглашённого пользователя.
+    Используется дробный буфер activity_carry, чтобы бонус копился корректно.
+    Возвращает (начислено_монет, referrer_id).
+    """
+    if activity_amount <= 0:
+        return 0, None
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT referrer_id, bonus_paid, COALESCE(activity_carry, 0)
+            FROM referrals
+            WHERE referred_id = ?
+            """,
+            (referred_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return 0, None
+        referrer_id, bonus_paid, carry = int(row[0]), int(row[1]), float(row[2] or 0)
+        if bonus_paid != 1:
+            return 0, None
+
+        carry += float(activity_amount) * 0.05
+        bonus = int(carry)
+        carry -= bonus
+
+        await db.execute(
+            "UPDATE referrals SET activity_carry = ? WHERE referred_id = ?",
+            (carry, referred_id),
+        )
+        if bonus > 0:
+            await db.execute(
+                "UPDATE users SET referral_coins = COALESCE(referral_coins, 0) + ? WHERE user_id = ?",
+                (bonus, referrer_id),
+            )
+            await db.execute(
+                "UPDATE referrals SET activity_paid = COALESCE(activity_paid, 0) + ? WHERE referred_id = ?",
+                (bonus, referred_id),
+            )
+        await db.commit()
+        return bonus, referrer_id
+
+
+async def get_user_tracks_for_promotion(user_id: int) -> list[dict]:
+    """Список треков пользователя для выбора продвижения."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT track_id, title
+            FROM tracks
+            WHERE user_id = ? AND COALESCE(deleted, 0) = 0
+            ORDER BY created_at DESC
+            """,
+            (user_id,),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def promote_track(track_id: int, user_id: int, cost: int = 5, impressions: int = 20) -> tuple[bool, str]:
+    """
+    Продвинуть трек:
+    - списывает монеты (если хватает),
+    - добавляет/обновляет промо-показы в приоритетной выдаче.
+    """
+    if impressions <= 0:
+        impressions = 20
+    if cost < 0:
+        cost = 0
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT 1 FROM tracks
+            WHERE track_id = ? AND user_id = ? AND COALESCE(deleted, 0) = 0
+            """,
+            (track_id, user_id),
+        )
+        if not await cursor.fetchone():
+            return False, "Трек не найден."
+
+        cursor = await db.execute(
+            "SELECT COALESCE(referral_coins, 0) FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        coins = int(row[0]) if row else 0
+        if coins < cost:
+            return False, f"Недостаточно монет. Нужно {cost}, у тебя {coins}."
+
+        await db.execute(
+            "UPDATE users SET referral_coins = COALESCE(referral_coins, 0) - ? WHERE user_id = ?",
+            (cost, user_id),
+        )
+        await db.execute(
+            """
+            INSERT INTO track_promotions (track_id, user_id, impressions_left)
+            VALUES (?, ?, ?)
+            ON CONFLICT(track_id) DO UPDATE SET
+                impressions_left = COALESCE(track_promotions.impressions_left, 0) + excluded.impressions_left,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (track_id, user_id, impressions),
+        )
+        await db.commit()
+    return True, f"Трек продвинут: +{impressions} приоритетных показов."
 
 
 async def list_referrals_for_referrer(referrer_id: int) -> list[dict]:
@@ -373,7 +515,7 @@ async def list_referrals_for_referrer(referrer_id: int) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            SELECT r.referred_id, u.username, u.full_name, u.display_name
+            SELECT r.referred_id, u.username, u.full_name, u.display_name, COALESCE(r.activity_paid, 0) as activity_paid
             FROM referrals r
             LEFT JOIN users u ON u.user_id = r.referred_id
             WHERE r.referrer_id = ? AND r.bonus_paid = 1
@@ -388,9 +530,25 @@ async def list_referrals_for_referrer(referrer_id: int) -> list[dict]:
                 "username": r[1],
                 "full_name": r[2],
                 "display_name": r[3],
+                "activity_paid": int(r[4] or 0),
             }
             for r in rows
         ]
+
+
+async def get_referral_activity_bonus_total(referrer_id: int) -> int:
+    """Сумма монет, начисленных рефереру по 5% активности друзей."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT COALESCE(SUM(activity_paid), 0)
+            FROM referrals
+            WHERE referrer_id = ? AND bonus_paid = 1
+            """,
+            (referrer_id,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0] or 0) if row else 0
 
 
 async def get_user_display_label(user_id: int) -> str:
@@ -975,6 +1133,43 @@ async def get_random_track_for_voting(user_id: int) -> dict | None:
     """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        # 1) Сначала пытаемся отдать продвигаемые треки.
+        cursor = await db.execute(
+            """
+            SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) as username
+            FROM track_promotions p
+            JOIN tracks t ON t.track_id = p.track_id
+            JOIN users u ON t.user_id = u.user_id
+            WHERE p.impressions_left > 0
+              AND t.user_id != ?
+              AND COALESCE(t.deleted, 0) = 0
+              AND t.user_id NOT IN (SELECT user_id FROM banned_users)
+              AND t.track_id NOT IN (SELECT track_id FROM ratings WHERE user_id = ?)
+            ORDER BY RANDOM()
+            LIMIT 1
+            """,
+            (user_id, user_id),
+        )
+        promoted = await cursor.fetchone()
+        if promoted:
+            track = dict(promoted)
+            await db.execute(
+                """
+                UPDATE track_promotions
+                SET impressions_left = impressions_left - 1
+                WHERE track_id = ? AND impressions_left > 0
+                """,
+                (track["track_id"],),
+            )
+            await db.execute(
+                "DELETE FROM track_promotions WHERE track_id = ? AND impressions_left <= 0",
+                (track["track_id"],),
+            )
+            await db.commit()
+            track["is_promoted"] = 1
+            return track
+
+        # 2) Обычная выдача.
         cursor = await db.execute(
             """SELECT t.*, COALESCE(NULLIF(u.display_name, ''), u.username) as username
                FROM tracks t
@@ -990,7 +1185,11 @@ async def get_random_track_for_voting(user_id: int) -> dict | None:
             (user_id, user_id)
         )
         row = await cursor.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        track = dict(row)
+        track["is_promoted"] = 0
+        return track
 
 
 async def ban_user(user_id: int) -> None:

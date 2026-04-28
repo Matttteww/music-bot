@@ -15,8 +15,17 @@ from database import (
     find_duplicate_track,
     replace_track_and_reset_ratings,
     get_free_replacements_left,
+    get_user_tracks_for_promotion,
+    promote_track,
+    get_user_coins,
 )
-from keyboards import main_menu_keyboard, cancel_keyboard, BTN_UPLOAD, BTN_CANCEL
+from keyboards import (
+    main_menu_keyboard,
+    cancel_keyboard,
+    BTN_UPLOAD,
+    BTN_CANCEL,
+    BTN_ARTIST_PROMOTE,
+)
 
 router = Router(name="upload")
 
@@ -37,6 +46,10 @@ class UploadTrack(StatesGroup):
     waiting_audio = State()
     waiting_title = State()
     replace_confirm = State()
+
+
+class PromoteTrack(StatesGroup):
+    choosing = State()
 
 
 @router.message(F.text == BTN_UPLOAD)
@@ -105,6 +118,50 @@ def _replace_confirm_keyboard(track_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Отмена", callback_data="replace_upload:cancel"),
     )
     return builder.as_markup()
+
+
+def _promote_select_keyboard(tracks: list[dict]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for t in tracks[:20]:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🚀 {(t.get('title') or '?')[:40]}",
+                callback_data=f"promo_tr:{t['track_id']}",
+            )
+        )
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="promo_tr:cancel"))
+    return builder.as_markup()
+
+
+async def start_promote_track_flow(message: Message, state: FSMContext) -> None:
+    user = message.from_user
+    if not user:
+        return
+    await state.clear()
+    tracks = await get_user_tracks_for_promotion(user.id)
+    if not tracks:
+        await message.answer(
+            "У тебя нет треков для продвижения. Сначала загрузи трек.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+    coins = await get_user_coins(user.id)
+    await state.set_state(PromoteTrack.choosing)
+    await message.answer(
+        "🚀 <b>Продвижение трека</b>\n\n"
+        "Что даёт продвижение:\n"
+        "— быстрее попадает в прослушивания\n"
+        "— выше шанс попасть на стримы\n\n"
+        "Цена: 5 монет за 20 приоритетных показов.\n"
+        f"Твой баланс: {coins} монет.\n\n"
+        "Выбери трек для продвижения:",
+        reply_markup=_promote_select_keyboard(tracks),
+    )
+
+
+@router.message(F.text == BTN_ARTIST_PROMOTE)
+async def start_promote_track(message: Message, state: FSMContext) -> None:
+    await start_promote_track_flow(message, state)
 
 
 @router.message(UploadTrack.waiting_audio, F.audio)
@@ -332,12 +389,8 @@ async def upload_free_queue_info(message: Message) -> None:
 
 
 @router.message(F.text == "🚀 Продвинуть трек (быстрее + стримы)")
-async def upload_promote_info(message: Message) -> None:
-    await message.answer(
-        "🚀 Продвижение скоро будет доступно.\n"
-        "Пока трек участвует в бесплатной очереди, а также может попасть на стрим через раздел стрима.",
-        reply_markup=main_menu_keyboard(),
-    )
+async def upload_promote_info(message: Message, state: FSMContext) -> None:
+    await start_promote_track_flow(message, state)
 
 
 @router.message(F.text == "📊 Смотреть статистику")
@@ -346,6 +399,46 @@ async def upload_stats_info(message: Message) -> None:
         "Открой «👤 Профиль», чтобы увидеть рейтинг и статистику по трекам.",
         reply_markup=main_menu_keyboard(),
     )
+
+
+@router.callback_query(F.data.startswith("promo_tr:"))
+async def promote_track_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    user = callback.from_user
+    if not user:
+        return
+    if callback.data == "promo_tr:cancel":
+        await state.clear()
+        try:
+            await callback.message.edit_text("Продвижение отменено.", reply_markup=None)
+        except Exception:
+            pass
+        await callback.message.answer("Выбери действие:", reply_markup=main_menu_keyboard())
+        await callback.answer()
+        return
+
+    track_id = int(callback.data.split(":", 1)[1])
+    ok, msg = await promote_track(track_id=track_id, user_id=user.id, cost=5, impressions=20)
+    await state.clear()
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if ok:
+        await callback.message.answer(
+            f"✅ {msg}\n\nТрек получил приоритет в выдаче слушателям.",
+            reply_markup=main_menu_keyboard(),
+        )
+    else:
+        await callback.message.answer(
+            f"⚠️ {msg}",
+            reply_markup=main_menu_keyboard(),
+        )
+    await callback.answer()
+
+
+@router.message(PromoteTrack.choosing)
+async def promote_track_choosing_ignore(message: Message) -> None:
+    await message.answer("Выбери трек кнопкой выше или нажми «❌ Отмена».")
 
 
 @router.message(Command("cancel"))

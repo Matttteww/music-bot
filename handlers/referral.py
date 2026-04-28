@@ -3,7 +3,11 @@ from aiogram import Router, F, html
 from aiogram.types import Message
 
 from config import BOT_USERNAME
-from database import get_referral_coins, list_referrals_for_referrer
+from database import (
+    get_referral_coins,
+    list_referrals_for_referrer,
+    get_referral_activity_bonus_total,
+)
 from keyboards import BTN_REFERRAL, main_menu_keyboard
 
 router = Router(name="referral")
@@ -21,6 +25,7 @@ async def show_referral_program(message: Message) -> None:
         return
     uid = message.from_user.id
     coins = await get_referral_coins(uid)
+    activity_bonus = await get_referral_activity_bonus_total(uid)
     link = referral_link_for_user(uid)
     rows = await list_referrals_for_referrer(uid)
 
@@ -38,9 +43,10 @@ async def show_referral_program(message: Message) -> None:
         "Пригласи друга по ссылке.\n"
         "💰 Ты получишь:\n"
         "+10 монет за активацию\n"
-        "+5% от активности друга (механика в разработке)\n",
+        "+5% от активности друга (начисляется автоматически)\n",
         link_block,
         f"\n<b>Твои монеты:</b> {coins}",
+        f"<b>Из них с 5% активности:</b> {activity_bonus}",
         "\n<b>Приглашённые (бонус начислен):</b>",
     ]
     if not rows:
@@ -50,6 +56,6 @@ async def show_referral_program(message: Message) -> None:
             rid = r["referred_id"]
             label = r.get("display_name") or r.get("full_name") or r.get("username") or str(rid)
             label = html.quote(str(label).strip() or str(rid))
-            parts.append(f"• {label} — +10 монет")
+            parts.append(f"• {label} — +10 монет, +{int(r.get('activity_paid') or 0)} от активности")
 
     await message.answer("\n".join(parts), reply_markup=main_menu_keyboard())

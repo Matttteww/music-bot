@@ -43,7 +43,9 @@ BTN_LISTENER_NEXT = "▶️ Следующий трек"
 BTN_LISTENER_TOURNAMENT = "🏆 Турнир"
 BTN_LISTENER_FAV_AFTER_RATE = "⭐ В избранное"
 BTN_ARTIST_PROMOTE = "🚀 Продвинуть трек"
-BTN_ARTIST_MY_TRACKS = "📊 Мои треки"
+BTN_ARTIST_MY_TRACKS = "🎵 Мои треки"
+BTN_PROFILE_STATS = "📊 Статистика"
+BTN_PROFILE_BACK = "🔙 Назад"
 BTN_STREAM_FREE = "🟢 Бесплатно (ограничено)"
 BTN_STREAM_PREMIUM = "💎 Premium"
 BTN_STREAM_PRO = "🔥 Pro"
@@ -169,19 +171,19 @@ def back_to_ratings_keyboard() -> ReplyKeyboardMarkup:
 def profile_keyboard(changes_left: int, has_tracks: bool = True) -> ReplyKeyboardMarkup:
     """Клавиатура профиля."""
     builder = ReplyKeyboardBuilder()
-    buttons: list[KeyboardButton] = []
+    buttons: list[KeyboardButton] = [
+        KeyboardButton(text=BTN_ARTIST_MY_TRACKS),
+        KeyboardButton(text=BTN_ARTIST_PROMOTE),
+        KeyboardButton(text=BTN_PROFILE_STATS),
+    ]
     if changes_left > 0:
         buttons.append(KeyboardButton(text=BTN_CHANGE_NICK))
     if has_tracks:
         buttons.append(KeyboardButton(text=BTN_REPLACE_TRACK))
-        buttons.append(KeyboardButton(text=BTN_DELETE_TRACK))
-    buttons.append(KeyboardButton(text=BTN_STREAM_ADD))
-    buttons.append(KeyboardButton(text=BTN_STREAM_EVALS))
-    buttons.append(KeyboardButton(text=BTN_MAIN_MENU))
+    buttons.append(KeyboardButton(text=BTN_PROFILE_BACK))
 
     for b in buttons:
         builder.add(b)
-    # 2 колонки как в главном меню -> одинаковый размер кнопок.
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 

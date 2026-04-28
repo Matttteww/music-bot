@@ -16,6 +16,7 @@ from database import (
     ban_user,
     toggle_favorite,
     is_track_in_favorites,
+    add_user_coins,
 )
 from keyboards import (
     rating_keyboard,
@@ -37,7 +38,6 @@ from keyboards import (
     BTN_REPORT_CANCEL,
     report_reason_keyboard,
     report_cancel_keyboard,
-    BTN_KING,
 )
 
 router = Router(name="vote")
@@ -52,7 +52,12 @@ class ReportState(StatesGroup):
     custom = State()
 
 
-def _format_track_caption(title: str, username: str, source_url: str | None = None) -> str:
+def _format_track_caption(
+    title: str,
+    username: str,
+    source_url: str | None = None,
+    is_promoted: bool = False,
+) -> str:
     safe_title = html.quote(title or "?")
     safe_username = html.quote(username or "unknown")
     text = (
@@ -61,6 +66,8 @@ def _format_track_caption(title: str, username: str, source_url: str | None = No
     )
     if source_url:
         text += f'🔗 <a href="{html.quote(source_url)}">Слушать на SoundCloud</a>\n\n'
+    if is_promoted:
+        text += "🚀 Продвигаемый трек\n"
     text += "Оцени трек от 1 до 10 (нажми кнопку):"
     return text
 
@@ -132,6 +139,7 @@ async def _send_track(
         track["title"],
         track.get("username") or "unknown",
         track.get("source_url"),
+        bool(track.get("is_promoted")),
     )
     if track.get("source_url"):
         await bot.send_message(
@@ -220,11 +228,9 @@ async def add_last_rated_to_favorites(message: Message, state: FSMContext) -> No
 
 @router.message(VotingState.active, F.text == BTN_LISTENER_TOURNAMENT)
 async def king_hint_after_rating(message: Message, state: FSMContext) -> None:
+    from handlers.king import start_king
     await state.clear()
-    await message.answer(
-        f"Жми «{BTN_KING}», чтобы начать турнир 1v1.",
-        reply_markup=main_menu_keyboard(),
-    )
+    await start_king(message, state, message.bot)
 
 
 @router.message(VotingState.active, F.text.in_({BTN_FAVORITE_ADD, BTN_FAVORITE_REMOVE}))
@@ -495,6 +501,7 @@ async def process_rating(message: Message, state: FSMContext, bot: Bot) -> None:
     if not success:
         await message.answer(msg)
         return
+    await add_user_coins(user.id, 1)
 
     # Уведомить автора трека об оценке
     rated_track = await get_track(track_id)

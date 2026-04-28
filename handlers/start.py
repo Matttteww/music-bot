@@ -190,11 +190,9 @@ async def streamer_tariff_info(message: Message) -> None:
 
 
 @router.message(F.text == BTN_STREAM_START_SESSION)
-async def streamer_start_session(message: Message) -> None:
-    await message.answer(
-        "Запускаем стрим-сценарий. Нажми «🎙 Закинуть трек на стрим» в меню профиля.",
-        reply_markup=main_menu_keyboard(),
-    )
+async def streamer_start_session(message: Message, state: FSMContext) -> None:
+    from handlers.stream import stream_add_start
+    await stream_add_start(message, state)
 
 
 @router.message(F.text == BTN_ARTIST_MY_TRACKS)
@@ -206,9 +204,6 @@ async def artist_my_tracks_hint(message: Message) -> None:
 
 
 @router.message(F.text == BTN_ARTIST_PROMOTE)
-async def artist_promote_hint(message: Message) -> None:
-    await message.answer(
-        "🚀 Продвижение ускоряет попадание в прослушивания и на стримы.\n"
-        "Пока доступна базовая очередь: загрузи трек и следи за статистикой в профиле.",
-        reply_markup=main_menu_keyboard(),
-    )
+async def artist_promote_hint(message: Message, state: FSMContext) -> None:
+    from handlers.upload import start_promote_track_flow
+    await start_promote_track_flow(message, state)

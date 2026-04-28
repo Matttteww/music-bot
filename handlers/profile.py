@@ -38,6 +38,10 @@ from keyboards import (
     BTN_DELETE_TRACK,
     BTN_CANCEL,
     BTN_STREAM_EVALS,
+    BTN_ARTIST_MY_TRACKS,
+    BTN_ARTIST_PROMOTE,
+    BTN_PROFILE_STATS,
+    BTN_PROFILE_BACK,
 )
 
 router = Router(name="profile")
@@ -299,6 +303,45 @@ async def show_profile(message: Message, state: FSMContext) -> None:
         await message.answer("Выбери действие:", reply_markup=pk)
     else:
         await message.answer(text, reply_markup=pk)
+
+
+@router.message(F.text == BTN_ARTIST_MY_TRACKS)
+async def profile_my_tracks(message: Message, state: FSMContext) -> None:
+    """Кнопка «Мои треки» в профиле."""
+    await show_profile(message, state)
+
+
+@router.message(F.text == BTN_PROFILE_STATS)
+async def profile_stats(message: Message) -> None:
+    """Краткая статистика профиля."""
+    user = message.from_user
+    if not user:
+        return
+    stats = await get_user_stats(user.id)
+    tracks_count = await get_user_tracks_count(user.id)
+    favorites_count = len(await get_user_favorites(user.id))
+    coins = await get_referral_coins(user.id)
+    await message.answer(
+        "📊 <b>Твоя статистика</b>\n\n"
+        f"💰 Монеты: {coins}\n"
+        f"📈 Рейтинг: {stats['artist_avg']}/10\n"
+        f"🎵 Треки: {tracks_count}\n"
+        f"⭐ В избранном: {favorites_count}\n"
+        f"🏆 Побед: {int(stats.get('king_wins') or 0)}",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(F.text == BTN_ARTIST_PROMOTE)
+async def profile_promote(message: Message, state: FSMContext) -> None:
+    from handlers.upload import start_promote_track_flow
+    await start_promote_track_flow(message, state)
+
+
+@router.message(F.text == BTN_PROFILE_BACK)
+async def profile_back(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Возвращаю в главное меню.", reply_markup=main_menu_keyboard())
 
 
 @router.message(F.text == BTN_STREAM_EVALS)
